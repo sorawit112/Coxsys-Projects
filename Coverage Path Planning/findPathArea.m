@@ -5,7 +5,7 @@
 k = 1;
 current_graph = start_area;
 candidate = cell(1,0);
-max_iter = 5;
+max_iter = 13;
 break_loop = false;
 while(~break_loop)
     while (k<=max_iter)
@@ -37,8 +37,13 @@ end
 dist_path = zeros(1,numel(candidate));
 for i = 1:numel(candidate)
     cand_i = candidate{i};
-    idxOut = area_graph.findedge(cand_i(1:end-1),cand_i(2:end));
-    dist_path(i) = sum(area_graph.Edges.Distance(idxOut));
+    path_edge = zeros(1,numel(cand_i)-1);
+    for j = 1:numel(cand_i)-1
+        path_edge(j) = intersect(area_graph.Nodes.Edges{cand_i(j)},area_graph.Nodes.Edges{cand_i(j+1)});
+    end
+    [~,idx]=ismember(path_edge,mid_edge_graph.Nodes.EdgeNumber);
+    
+    dist_path(i) = sum(mid_edge_graph.Edges.Weight(idx));
 end
 
 [min_dist,idx] = min(dist_path);
@@ -55,4 +60,9 @@ end
 
 % area to travel to & status whether to clean
 [path_nodes path_clean]
+path_edge = zeros(1,numel(path_nodes)-1);
+for i = 1:numel(path_nodes)-1
+    path_edge(i) = intersect(area_graph.Nodes.Edges{path_nodes(i)},area_graph.Nodes.Edges{path_nodes(i+1)});
+end
 
+[~,idx]=ismember(path_edge,mid_edge_graph.Nodes.EdgeNumber);
