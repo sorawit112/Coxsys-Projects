@@ -155,10 +155,10 @@ end
 grid on;
 axis equal;
 
-<<<<<<< Updated upstream
+%<<<<<<< Updated upstream
 
 % size(via_point_edge,2)+size(via_point_area,2)
-=======
+%=======
 num_via_edge = num_via_edge+size(via_point_edge,2);
 num_via_area = num_via_area+size(via_point_area,2);
->>>>>>> Stashed changes
+%>>>>>>> Stashed changes

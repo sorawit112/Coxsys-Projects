@@ -284,7 +284,9 @@ for i = area_graph.Nodes.Number'
    end
 end
 
-sorted_list = sort(connectivity_mid_edge,2,'ascend'); 
+connectivity_mid_edge
+
+sorted_list = sort(connectivity_mid_edge,2,'ascend') 
 connectivity_mid_edge = sortrows(sorted_list);
 
 point_a = wall_graph.Edges.MidEdge(connectivity_mid_edge(:,1),:);
