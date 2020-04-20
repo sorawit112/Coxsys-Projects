@@ -1,6 +1,6 @@
 clear
-current_pose = [2 -1];
-end_pose = [10 3];
+current_pose = [4 6];
+end_pose = [4 6];
 radius = 2;
 vertices = [0 11 7 1; 0 0 6 5]';
 % vertices = [1 5 6 6 5 1 0; 0 0 1 5 6 6 5]'; % cut exactly at vertex ** special case

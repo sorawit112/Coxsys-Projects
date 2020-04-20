@@ -158,10 +158,16 @@ if isPlot
     end
     plot(vertices([1:end 1],1),vertices([1:end 1],2),'b','linewidth',3);
     
+    plot(current_pose(1), current_pose(2),'*k')
+    text(current_pose(1), current_pose(2),'start')
+
+    plot(end_pose(1), end_pose(2),'*k')
+    text(end_pose(1), end_pose(2),'end')
+    
     for i = 1:Gsol.numedges
         point_a = region_cm(Gsol.Edges.EndNodes(i,1),:);
         point_b = region_cm(Gsol.Edges.EndNodes(i,2),:);
-        
+                
         plot([point_a(1) point_b(1)],[point_a(2) point_b(2)],'g','linewidth',4)
     end
     
