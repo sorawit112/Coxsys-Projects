@@ -94,26 +94,56 @@ class infrastructureGraph:
         
         # create nodes
         for node in name_Nodes:
-            self.area_graph.add_node(node, centroid = [0, 0], vertices = vertices[node-1], area_edges = self.area_edges[node-1])
+            self.area_graph.add_node(node, centroid = [0, 0], vertices = vertices[node-1], actual_vertices = [], area_edges = self.area_edges[node-1])
 
         # create edges
         for edge in range(num_edges):
             self.area_edges_dict[edge] = [self.con_a[0][edge], self.con_a[1][edge]]
-            self.area_graph.add_edge(self.con_a[0][edge], self.con_a[1][edge], distance = 0)
-        
-        # calculate centroid
-        for i in self.area_graph._node:
-            coordinates = [self.wall_graph._node[ver]['Coordinates'] for ver in self.area_graph._node[i]['vertices']]
-            num_ver = len(self.area_graph._node[i]['vertices'])
-            centroid_i = list(np.sum(coordinates, axis=0)/num_ver)
-            self.area_graph._node[i]['centroid'] = centroid_i
+            self.area_graph.add_edge(self.con_a[0][edge], self.con_a[1][edge])
+    
+        # calculate nodes properties
+        caltimes = 0
+        while caltimes < 2: 
+            for i in self.area_graph._node:
+                coordinates = [self.wall_graph._node[ver]['Coordinates'] for ver in self.area_graph._node[i]['vertices']]
+                num_ver = len(self.area_graph._node[i]['vertices'])
+                centroid_i = list(np.sum(coordinates, axis=0)/num_ver)
+                self.area_graph._node[i]['centroid'] = centroid_i
 
-        # calculate area distance
-        num_edges = len(self.area_edges)
-        for i in range(num_edges):
-            cm_ab = [self.area_graph._node[self.area_edges_dict[i][0]]['centroid'], self.area_graph._node[self.area_edges_dict[i][1]]['centroid']]
-            self.area_graph[self.area_edges_dict[i][0]][self.area_edges_dict[i][1]]['distance'] = np.sqrt((cm_ab[0][0]-cm_ab[1][0])**2 + (cm_ab[0][1]-cm_ab[1][1])**2)
-        
+                ver_shift = np.subtract(coordinates, centroid_i)
+                theta_i = np.zeros((num_ver))
+
+                for j in range(num_ver):
+                    point_a = ver_shift[j]
+                    if j+1 != num_ver:
+                        point_b = ver_shift[j+1]
+                    else:
+                        point_b = ver_shift[0]
+
+                    theta_i[j] = np.mod(np.arctan2(point_b[1] - point_a[1], point_b[0] - point_a[0]), 2*np.pi)
+                
+                actual_theta = []
+                actual_vertices = []
+                ver_list = self.area_graph._node[i]['vertices']
+
+                for j in range(num_ver):
+                    if len(actual_theta) == 0:
+                        actual_theta.append(theta_i[j])
+                        actual_vertices.append(ver_list[j])
+                    else:
+                        if abs(theta_i[j-1] - theta_i[j]) > 0.000001:
+                            actual_theta.append(theta_i[j])
+                            actual_vertices.append(ver_list[j])
+
+                num_actual_ver = len(actual_theta)
+
+                self.area_graph._node[i]['actual_vertices'] = actual_vertices
+
+                actual_coordinates = [self.wall_graph._node[x]['Coordinates'] for x in actual_vertices]
+                num_actual_ver = len(actual_vertices)
+                self.area_graph._node[i]['centroid'] = sum(np.array(actual_coordinates))/num_actual_ver
+
+            caltimes = caltimes+1
         return None
 
     def midEdgesGraphInit(self):
@@ -151,6 +181,11 @@ class infrastructureGraph:
 
         return None
 
+    def centroid(self, vertices_i):
+        vertices = [vertices_i , vertices_i]
+        A = vertices
+
+
     def visualize_area(self):
         if self.VISUAL:
             for i in self.wall_edges_dict:
@@ -170,14 +205,21 @@ class infrastructureGraph:
 
             for i in self.area_graph._node:
                 plt.text(self.area_graph._node[i]['centroid'][0], self.area_graph._node[i]['centroid'][1], str(i))
+                for j in self.area_graph._node[i]['actual_vertices']:
+                    x = self.wall_graph._node[j]['Coordinates'][0]
+                    y = self.wall_graph._node[j]['Coordinates'][1]
+                    plt.plot(x, y, 'b*')
                 
             plt.axis('equal')
             plt.show()
         
 class coveragePathPlanning(infrastructureGraph):
     start_area = 1
-    goal_area = 1
+    goal_area = 7
     cleanning_area = [2, 3, 4, 5, 8, 9]
+    area_path = []
+    clean_path = []
+    mid_edge_path_idx = []
 
     def __init__(self, selected_points, connectivity_edges, selected_wall, selected_area_edges, connectivity_areas, visual = False):
         super().__init__(selected_points, connectivity_edges, selected_wall, selected_area_edges, connectivity_areas, visual)
@@ -193,7 +235,7 @@ class coveragePathPlanning(infrastructureGraph):
         k = 1
         current_graph = [self.start_area]
         candidate = []
-        max_iter = 5
+        max_iter = 4
 
         while True:
             while (k <= max_iter):
@@ -230,14 +272,37 @@ class coveragePathPlanning(infrastructureGraph):
         print(candidate)
         for candi_i in candidate:
             path_edge = [list(set([e for e in self.area_graph._node[candi_i[x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[candi_i[x+1]]['area_edges']])))[0] for x in range(len(candi_i)-1)]
-            
-            # idx = [ for i in path_edge]
+            node_idx = [[self.mid_edges_graph._node[y]['edge_Number'] for y in self.mid_edges_graph._node].index(x)+1 for x in path_edge]
+            dist_temp = 0
 
+            for idx in range(len(node_idx)-1):
+                current_node = node_idx[idx]
+                next_node = node_idx[idx+1]
+                if next_node - current_node != 0:
+                    dist_temp = dist_temp + self.mid_edges_graph[current_node][next_node]['weight']
+            dist_path.append(dist_temp)
 
+        min_dist = min(dist_path)
+        min_dist_idx = dist_path.index(min_dist)
+
+        path = candidate[min_dist_idx]
+
+        cleanList = self.cleanning_area
+        path_clean = []
+        for i in range(len(path)):
+            if path[i] in cleanList:
+                path_clean.append(1)
+                cleanList.pop(cleanList.index(path[i]))
+            else:
+                path_clean.append(0)
+
+        mid_edge_path = [list(set([e for e in self.area_graph._node[path[x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[path[x+1]]['area_edges']])))[0] for x in range(len(path)-1)]
+        
+        self.area_path = path
+        self.clean_path = path_clean
+        self.mid_edge_path_idx = [[self.mid_edges_graph._node[y]['edge_Number'] for y in self.mid_edges_graph._node].index(x)+1 for x in mid_edge_path]
+               
         return None
-
-# def PolyArea(x,y):
-#     return 0.5*np.abs(np.dot(x,np.roll(y,1))-np.dot(y,np.roll(x,1)))
 
 if __name__ == "__main__":
 #----------------data from user interface--------------------------------------------------------------------------#

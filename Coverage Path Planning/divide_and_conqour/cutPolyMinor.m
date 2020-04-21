@@ -48,17 +48,6 @@ for i = 1:2
             if norm(cut_intersect-current)<0.00000001
                 loop_break = true;
             else
-                %                 if abs(cut_intersect(1)-current(1))<0.000000001
-                %                     val_x = 0;
-                %                 else
-                %                     val_x = cut_intersect(1)-current(1);
-                %                 end
-                %                 if abs(cut_intersect(2)-current(2))<0.000000001
-                %                     val_y = 0;
-                %                 else
-                %                     val_y = cut_intersect(2)-current(2);
-                %                 end
-                %                 cut_direction = -atan2(val_x,val_y);
                 cut_direction = -atan2(cut_intersect(1)-current(1),cut_intersect(2)-current(2));
                 if cos(cut_direction-theta_look_ahead)<0
                     ver_list_minus = [ver_list_minus; look_ahead];
@@ -103,22 +92,7 @@ for i = 1:2
             ver_list_plus = [ver_list_plus; look_ahead];
             current_ver = idx;
         else
-            if abs(det(A))<0.000001
-                theta_look_ahead
-                theta_cut
-                disp('hey')
-            end
             cut_intersect = A\b;
-            %             if abs(cut_intersect(1)-current(1))<0.000000001
-            %                 val_x = 0;
-            %             else
-            %                 val_x = cut_intersect(1)-current(1);
-            %             end
-            %             if abs(cut_intersect(2)-current(2))<0.000000001
-            %                 val_y = 0;
-            %             else
-            %                 val_y = cut_intersect(2)-current(2);
-            %             end
             cut_direction = -atan2(cut_intersect(1)-current(1),cut_intersect(2)-current(2));
             if cos(cut_direction-theta_look_ahead)<0
                 ver_list_plus = [ver_list_plus; look_ahead];

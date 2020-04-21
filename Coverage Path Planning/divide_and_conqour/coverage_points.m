@@ -7,8 +7,6 @@ if any(sum((vertices_i-cm).^2,2)>(radius^2))
     axis equal;
     s_1 = sub_poly{1};
     s_2 = sub_poly{2};
-    plot(s_1([1:end 1],1),s_1([1:end 1],2),'r')
-    plot(s_2([1:end 1],1),s_2([1:end 1],2),'b')
     [polygon_1,region_cm_1,region_radius_1] = coverage_points(sub_poly{1},radius);
     [polygon_2,region_cm_2,region_radius_2] = coverage_points(sub_poly{2},radius);
     cm_1 = centroid(sub_poly{1});
@@ -26,7 +24,6 @@ else
     actual_radii = sqrt((sum((vertices_i-cm).^2,2)));
     [~,idx] = max(actual_radii);
     actual_radius = max(actual_radii(idx));
-    plot(cm(1),cm(2),'mo')
     polygons = {vertices_i};
     region_cm = cm;
     region_radius = actual_radius;
