@@ -1,6 +1,7 @@
 import numpy as np
 from numpy import matlib
 import matplotlib.pyplot as plt
+from matplotlib import path
 from tabulate import tabulate
 import networkx as nx
 
@@ -36,7 +37,6 @@ class infrastructureGraph:
 
     wall_edges_dict = {}
     area_edges_dict = {}
-    mid_edges_dict = {}
 
     VISUAL = False
 
@@ -74,6 +74,7 @@ class infrastructureGraph:
         num_area = self.area_edges.shape[0]
         vertices = []
 
+        # automatically detect vertices of an area based on edge
         for i in range(num_area):
             
             area_edges_i = self.area_edges[i]
@@ -90,60 +91,54 @@ class infrastructureGraph:
 
         name_Nodes = range(1, num_area+1)
         num_edges = self.con_a.shape[1]
-        # NodeTable = tabulate([np.transpose(name_Nodes), np.transpose(centroid), np.transpose(area), np.transpose(vertices), np.transpose(inner_vertices), np.transpose(corner_vertices), np.transpose(area_edges), np.transpose(theta), np.transpose(alpha), np.transpose(ver_opp), np.transpose(rho_offset)],headers=["Number","Centroid","Area","Vertices","InnerVertices","Corner","Edges","Theta","Alpha","VerOpp","RhoOffset"], tablefmt="fancy_grid")
-        
+    
         # create nodes
         for node in name_Nodes:
-            self.area_graph.add_node(node, centroid = [0, 0], vertices = vertices[node-1], actual_vertices = [], area_edges = self.area_edges[node-1])
+            self.area_graph.add_node(node, centroid = [0, 0], area = 0, vertices = vertices[node-1], actual_vertices = [], area_edges = self.area_edges[node-1])
 
         # create edges
         for edge in range(num_edges):
             self.area_edges_dict[edge] = [self.con_a[0][edge], self.con_a[1][edge]]
             self.area_graph.add_edge(self.con_a[0][edge], self.con_a[1][edge])
     
-        # calculate nodes properties
-        caltimes = 0
-        while caltimes < 2: 
-            for i in self.area_graph._node:
-                coordinates = [self.wall_graph._node[ver]['Coordinates'] for ver in self.area_graph._node[i]['vertices']]
-                num_ver = len(self.area_graph._node[i]['vertices'])
-                centroid_i = list(np.sum(coordinates, axis=0)/num_ver)
-                self.area_graph._node[i]['centroid'] = centroid_i
+        # find centroid and actual vertices 
+        for i in self.area_graph._node:
+            coordinates = [self.wall_graph._node[ver]['Coordinates'] for ver in self.area_graph._node[i]['vertices']]
+            self.area_graph._node[i]['area'] = PolyArea([cor[0] for cor in coordinates], [cor[1] for cor in coordinates])
+            num_ver = len(self.area_graph._node[i]['vertices'])
+            centroid_i = self.centroid(coordinates)
+            self.area_graph._node[i]['centroid'] = centroid_i
 
-                ver_shift = np.subtract(coordinates, centroid_i)
-                theta_i = np.zeros((num_ver))
+            ver_shift = np.subtract(coordinates, centroid_i)
+            theta_i = np.zeros((num_ver))
 
-                for j in range(num_ver):
-                    point_a = ver_shift[j]
-                    if j+1 != num_ver:
-                        point_b = ver_shift[j+1]
-                    else:
-                        point_b = ver_shift[0]
+            for j in range(num_ver):
+                point_a = ver_shift[j]
+                if j+1 != num_ver:
+                    point_b = ver_shift[j+1]
+                else:
+                    point_b = ver_shift[0]
 
-                    theta_i[j] = np.mod(np.arctan2(point_b[1] - point_a[1], point_b[0] - point_a[0]), 2*np.pi)
-                
-                actual_theta = []
-                actual_vertices = []
-                ver_list = self.area_graph._node[i]['vertices']
+                theta_i[j] = np.mod(np.arctan2(point_b[1] - point_a[1], point_b[0] - point_a[0]), 2*np.pi)
+            
+            actual_theta = []
+            actual_vertices = []
+            ver_list = self.area_graph._node[i]['vertices']
 
-                for j in range(num_ver):
-                    if len(actual_theta) == 0:
+            for j in range(num_ver):
+                if len(actual_theta) == 0:
+                    actual_theta.append(theta_i[j])
+                    actual_vertices.append(ver_list[j])
+                else:
+                    if abs(theta_i[j-1] - theta_i[j]) > 0.000001:
                         actual_theta.append(theta_i[j])
                         actual_vertices.append(ver_list[j])
-                    else:
-                        if abs(theta_i[j-1] - theta_i[j]) > 0.000001:
-                            actual_theta.append(theta_i[j])
-                            actual_vertices.append(ver_list[j])
 
-                num_actual_ver = len(actual_theta)
+            self.area_graph._node[i]['actual_vertices'] = actual_vertices
+            actual_coordinates = [self.wall_graph._node[x]['Coordinates'] for x in actual_vertices]
+            self.area_graph._node[i]['centroid'] = self.centroid(actual_coordinates)
 
-                self.area_graph._node[i]['actual_vertices'] = actual_vertices
-
-                actual_coordinates = [self.wall_graph._node[x]['Coordinates'] for x in actual_vertices]
-                num_actual_ver = len(actual_vertices)
-                self.area_graph._node[i]['centroid'] = sum(np.array(actual_coordinates))/num_actual_ver
-
-            caltimes = caltimes+1
+            
         return None
 
     def midEdgesGraphInit(self):
@@ -181,9 +176,16 @@ class infrastructureGraph:
 
         return None
 
-    def centroid(self, vertices_i):
-        vertices = [vertices_i , vertices_i]
-        A = vertices
+    def centroid(self, vertices):
+        vertices.append(vertices[0])
+        
+        A = np.subtract([[vertices[i][0]*vertices[i+1][1]] for i in range(len(vertices)-1)] , [[vertices[i+1][0]*vertices[i][1]] for i in range(len(vertices)-1)])
+        As = sum(A)/2
+
+        x_bar = ((sum([(vertices[i+1][0] + vertices[i][0])*A[i] for i in range(len(vertices)-1)])*1/6)/As)[0]
+        y_bar = ((sum([(vertices[i+1][1] + vertices[i][1])*A[i] for i in range(len(vertices)-1)])*1/6)/As)[0]
+        
+        return [x_bar, y_bar]
 
 
     def visualize_area(self):
@@ -212,10 +214,16 @@ class infrastructureGraph:
                 
             plt.axis('equal')
             plt.show()
-        
+
+def PolyArea(x,y):
+    return 0.5*np.abs(np.dot(x,np.roll(y,1))-np.dot(y,np.roll(x,1)))
+
+
 class coveragePathPlanning(infrastructureGraph):
+    radius = 3
+    
     start_area = 1
-    goal_area = 7
+    goal_area = 5
     cleanning_area = [2, 3, 4, 5, 8, 9]
     area_path = []
     clean_path = []
@@ -224,12 +232,74 @@ class coveragePathPlanning(infrastructureGraph):
     def __init__(self, selected_points, connectivity_edges, selected_wall, selected_area_edges, connectivity_areas, visual = False):
         super().__init__(selected_points, connectivity_edges, selected_wall, selected_area_edges, connectivity_areas, visual)
 
-    def generate_robotWorkFlowPath(self, start_area, goal_area, cleaning_area):
+    def generate_robotWorkFlowPath(self, start_pose, goal_pose, cleaning_area):
+        self.cleanning_area = cleaning_area
         
-        pass
+        # detect area for start pose and goal pose
+        i = 1
+        flag_start = False
+        flag_goal = False
 
-    def generate_viapoints(self):
-        pass
+        while i <= len(self.area_graph._node):
+            ver_list = self.area_graph._node[i]['actual_vertices']
+            coor = np.transpose([self.wall_graph._node[x]['Coordinates'] for x in ver_list])
+            if inpolygon(np.array([start_pose[0]]), np.array([start_pose[1]]), coor[0], coor[1])[0] and not flag_start:
+                self.start_area = i
+                flag_start = True
+            
+            if inpolygon(np.array([goal_pose[0]]), np.array([goal_pose[1]]), coor[0], coor[1])[0] and not flag_goal:
+                self.goal_area = i
+                flag_goal = True
+
+            if flag_start and flag_goal:
+                break
+
+            i = i + 1
+
+        # generate global area path
+        self.generate_areaPath()
+
+        # generate via-points
+        num_node_path = len(self.area_path)
+        current_pose = start_pose
+        self.robot_path = [current_pose]
+        
+        time = 0
+        for i in range(num_node_path):
+            if self.clean_path[i]:
+                if i != num_node_path-1:
+                    edge = self.wall_edges_dict[self.mid_edges_graph._node[self.mid_edge_path_idx[i]]['edge_Number']]
+                    end_pose = self.wall_graph[edge[0]][edge[1]]['midEdge']
+                else:
+                    end_pose = self.area_graph._node[i]['centroid']
+
+                [via_points, region_radius] = self.viaPointGenerator([self.wall_graph._node[ver]['coordinates'] for ver in self.area_graph._node[i]['actual_vertices']], current_pose, end_pose)
+                
+                for via in via_points:
+                    self.robot_path.append(via)
+
+                current_pose = via_points[len(via_points)-1]
+
+            else:
+                if i != num_node_path-1:
+                    edge = self.wall_edges_dict[self.mid_edges_graph._node[self.mid_edge_path_idx[i]]['edge_Number']]
+                    next_pose = self.wall_graph[edge[0]][edge[1]]['midEdge']
+    
+                else:
+                    next_pose = self.area_graph._node[i]['centroid']
+
+                self.robot_path.append(next_pose)
+                current_pose = next_pose
+                
+
+
+    def viaPointGenerator(self, Coordinates, start_pose, end_pose):
+        radius = self.radius
+        via_points = []
+        region_radius = []
+
+
+        return [via_points, region_radius]
     
     def generate_areaPath(self):
         k = 1
@@ -269,7 +339,6 @@ class coveragePathPlanning(infrastructureGraph):
 
         # find minimum path
         dist_path = []
-        print(candidate)
         for candi_i in candidate:
             path_edge = [list(set([e for e in self.area_graph._node[candi_i[x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[candi_i[x+1]]['area_edges']])))[0] for x in range(len(candi_i)-1)]
             node_idx = [[self.mid_edges_graph._node[y]['edge_Number'] for y in self.mid_edges_graph._node].index(x)+1 for x in path_edge]
@@ -285,24 +354,35 @@ class coveragePathPlanning(infrastructureGraph):
         min_dist = min(dist_path)
         min_dist_idx = dist_path.index(min_dist)
 
-        path = candidate[min_dist_idx]
+        path_n = candidate[min_dist_idx]
 
         cleanList = self.cleanning_area
         path_clean = []
-        for i in range(len(path)):
-            if path[i] in cleanList:
+        for i in range(len(path_n)):
+            if path_n[i] in cleanList:
                 path_clean.append(1)
-                cleanList.pop(cleanList.index(path[i]))
+                cleanList.pop(cleanList.index(path_n[i]))
             else:
                 path_clean.append(0)
 
-        mid_edge_path = [list(set([e for e in self.area_graph._node[path[x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[path[x+1]]['area_edges']])))[0] for x in range(len(path)-1)]
+        mid_edge_path = [list(set([e for e in self.area_graph._node[path_n[x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[path_n[x+1]]['area_edges']])))[0] for x in range(len(path_n)-1)]
         
-        self.area_path = path
+        self.area_path = path_n
         self.clean_path = path_clean
         self.mid_edge_path_idx = [[self.mid_edges_graph._node[y]['edge_Number'] for y in self.mid_edges_graph._node].index(x)+1 for x in mid_edge_path]
                
         return None
+
+def inpolygon(xq, yq, xv, yv):
+    shape = xq.shape
+    xq = xq.reshape(-1)
+    yq = yq.reshape(-1)
+    xv = xv.reshape(-1)
+    yv = yv.reshape(-1)
+    q = [(xq[i], yq[i]) for i in range(xq.shape[0])]
+    p = path.Path([(xv[i], yv[i]) for i in range(xv.shape[0])])
+    return p.contains_points(q).reshape(shape)
+
 
 if __name__ == "__main__":
 #----------------data from user interface--------------------------------------------------------------------------#
@@ -340,7 +420,8 @@ if __name__ == "__main__":
 #----------------------------------Construction Graph---------------------------------------------------------------#
     CPP = coveragePathPlanning(p, con_e, isWall, area_edges, con_a, True)
     CPP.initialize_graphs()
-    CPP.generate_areaPath()
+    CPP.generate_robotWorkFlowPath([-0.9, -0.4], [2.5, 9], [2, 3, 4, 5, 8, 9])
+    # CPP.generate_areaPath()
     CPP.visualize_area()
-    
+       
     print("")
