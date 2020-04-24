@@ -4,27 +4,10 @@ import matplotlib.pyplot as plt
 from matplotlib import path
 from tabulate import tabulate
 import networkx as nx
+from matplotlib import animation
 
 
 class infrastructureGraph:
-    energy = 67   # to kill [J/m^2]
-
-    width_inner = 0.3 
-    power_inner = 0.76
-
-    width_outer = 1.3  
-    power_outer = 0.53
-
-    offset_ratio = 1.5
-
-    grid_width = (width_outer-width_inner)
-    edge_width = (width_outer-width_inner)
-    power_actual = min(power_inner,power_outer)
-
-    duration = energy/power_actual
-    minute = duration/60
-
-
     p = np.array([])
     con_e = np.array([])
     isWall = np.array([])
@@ -185,46 +168,52 @@ class infrastructureGraph:
         x_bar = ((sum([(vertices[i+1][0] + vertices[i][0])*A[i] for i in range(len(vertices)-1)])*1/6)/As)[0]
         y_bar = ((sum([(vertices[i+1][1] + vertices[i][1])*A[i] for i in range(len(vertices)-1)])*1/6)/As)[0]
         
+        vertices = vertices[: len(vertices)-1]
         return [x_bar, y_bar]
 
+    def visual_area(self):
+        for i in self.wall_edges_dict:
+            wall_i = self.wall_edges_dict[i]
+            points = [self.wall_graph._node[wall_i[0]]['Coordinates'], self.wall_graph._node[wall_i[1]]['Coordinates']]
+            if self.wall_graph[wall_i[0]][wall_i[1]]['isWall'] == 1:
+                c = 'k'
+            else:
+                c = '--r'
+            
+            plt.plot([points[0][0], points[1][0]], [points[0][1], points[1][1]], c)
 
-    def visualize_area(self):
-        if self.VISUAL:
-            for i in self.wall_edges_dict:
-                wall_i = self.wall_edges_dict[i]
-                points = [self.wall_graph._node[wall_i[0]]['Coordinates'], self.wall_graph._node[wall_i[1]]['Coordinates']]
-                if self.wall_graph[wall_i[0]][wall_i[1]]['isWall'] == 1:
-                    c = 'k'
-                else:
-                    c = 'r'
+            point_mid = self.wall_graph[wall_i[0]][wall_i[1]]['midEdge']
+            plt.plot(point_mid[0], point_mid[1], 'k.')
+            plt.text(point_mid[0], point_mid[1], str(i))
                 
-                plt.plot([points[0][0], points[1][0]], [points[0][1], points[1][1]], c)
+        for i in self.area_graph._node:
+            plt.text(self.area_graph._node[i]['centroid'][0], self.area_graph._node[i]['centroid'][1], str(i))
+            for j in self.area_graph._node[i]['actual_vertices']:
+                x = self.wall_graph._node[j]['Coordinates'][0]
+                y = self.wall_graph._node[j]['Coordinates'][1]
+                plt.plot(x, y, 'b*')
 
-                point_mid = self.wall_graph[wall_i[0]][wall_i[1]]['midEdge']
-                plt.plot(point_mid[0], point_mid[1], 'k.')
-                plt.text(point_mid[0], point_mid[1], str(i))
-                
-
-            for i in self.area_graph._node:
-                plt.text(self.area_graph._node[i]['centroid'][0], self.area_graph._node[i]['centroid'][1], str(i))
-                for j in self.area_graph._node[i]['actual_vertices']:
-                    x = self.wall_graph._node[j]['Coordinates'][0]
-                    y = self.wall_graph._node[j]['Coordinates'][1]
-                    plt.plot(x, y, 'b*')
-                
-            plt.axis('equal')
-            plt.show()
-
-def PolyArea(x,y):
-    return 0.5*np.abs(np.dot(x,np.roll(y,1))-np.dot(y,np.roll(x,1)))
+        plt.axis('equal')
+        plt.show()
 
 
 class coveragePathPlanning(infrastructureGraph):
-    radius = 3
+    radius = 3    
     
-    start_area = 1
-    goal_area = 5
-    cleanning_area = [2, 3, 4, 5, 8, 9]
+    time_kill = 0
+    start_area = 0
+    goal_area = 0
+    cleanning_area = []
+
+    energy = 67
+    coef = [[0.1431328927561467724],
+          [-11.0300107335172262],
+              [80.2553874972875],
+       [-209.437642843722228422],
+            [197.34549417652961],
+          [-3.61325901328181954]]
+
+
     area_path = []
     clean_path = []
     mid_edge_path_idx = []
@@ -257,27 +246,39 @@ class coveragePathPlanning(infrastructureGraph):
             i = i + 1
 
         # generate global area path
+        print('start area : ' + str(self.start_area) + ', goal area : ' + str(self.goal_area))
+        print('generating area paths\n')
         self.generate_areaPath()
 
         # generate via-points
         num_node_path = len(self.area_path)
         current_pose = start_pose
         self.robot_path = [current_pose]
-        
+        self.robot_clean_status = [0]
+        self.robot_clean_radius = [0]
+
         time = 0
+
         for i in range(num_node_path):
+            
             if self.clean_path[i]:
                 if i != num_node_path-1:
                     edge = self.wall_edges_dict[self.mid_edges_graph._node[self.mid_edge_path_idx[i]]['edge_Number']]
                     end_pose = self.wall_graph[edge[0]][edge[1]]['midEdge']
                 else:
-                    end_pose = self.area_graph._node[i]['centroid']
+                    end_pose = self.area_graph._node[self.area_path[i]]['centroid']
 
-                [via_points, region_radius] = self.viaPointGenerator([self.wall_graph._node[ver]['coordinates'] for ver in self.area_graph._node[i]['actual_vertices']], current_pose, end_pose)
-                
-                for via in via_points:
-                    self.robot_path.append(via)
+                # print(i)
+                [via_points, region_radius] = self.viaPointGenerator([self.wall_graph._node[ver]['Coordinates'] for ver in self.area_graph._node[self.area_path[i]]['actual_vertices']], current_pose, end_pose)
+                # print(via_points)
 
+                time = time + self.calculate_time_kill(region_radius)
+
+                for i in range(len(via_points)):
+                    self.robot_path.append(via_points[i])
+                    self.robot_clean_radius.append(region_radius[i])
+                    self.robot_clean_status.append(1)
+                    
                 current_pose = via_points[len(via_points)-1]
 
             else:
@@ -286,26 +287,330 @@ class coveragePathPlanning(infrastructureGraph):
                     next_pose = self.wall_graph[edge[0]][edge[1]]['midEdge']
     
                 else:
-                    next_pose = self.area_graph._node[i]['centroid']
+                    next_pose = self.area_graph._node[self.area_path[i]]['centroid']
+                    
 
-                self.robot_path.append(next_pose)
+                self.robot_path.append(list(next_pose))
+                self.robot_clean_radius.append(0)
+                self.robot_clean_status.append(0)
                 current_pose = next_pose
+
+            
+            # print(i)
+            # print(self.robot_path)
+            # print('----------------\n')
+        
+        self.time_kill = time
+
+        hours = np.floor(time/3600)
+        minutes = np.floor((time%3600)/60)
+        seconds = np.floor(time - 3600*hours - 60*minutes)
+        area = sum([self.area_graph._node[area]['area'] for area in self.area_path])
+        
+        performance = time/area
+
+        print('robot path : ' + str(len(self.robot_path)) + ' points\n')
+        for i in range(len(self.robot_path)):
+            print('via-point '+ str(i) +' : ' + str(self.robot_path[i]) + ' status clean : ' + str(self.robot_clean_status[i]) + ' cleaning radius : ' + str(self.robot_clean_radius[i]) +'\n' )
+
+        print('Time Spent : ' + str(hours) + ' Hours ' + str(minutes) + ' Minutes ' + str(seconds) + ' Seconds\n')
+        print('Performance : ' + str(round(performance,2)) + ' s/m^2\n')
+
+        if self.VISUAL:
+            self.visualize_path()
+    
+    def calculate_time_kill(self, r):
+        order = len(self.coef) - 1
+        order_list = [ i for i in range(order,-1,-1)]
+        time = 0
+
+
+        for r_i in r:
+            time = time + (self.energy*100/(np.matmul((r_i ** order_list),self.coef)))[0]
+
+        return time
+
+    def viaPointGenerator(self, vertices, current_pose, end_pose):
+        [polygon, region_cm, region_radius] = self.coverage_points(vertices)
+        region_cm = list(region_cm)
+        region_radius = list(region_radius)
+
+        if len(region_cm) == 1:
+            via_points = region_cm
+            path_radius = region_radius
+
+        elif len(region_cm) == 2:
+            via_points = []
+            path_radius = []
+
+            d_current = list(np.linalg.norm((np.array(region_cm) - current_pose), axis = 1))
+            idx_start = d_current.index(min(d_current))
+            via_points.append(region_cm[idx_start])
+            path_radius.append(region_radius[idx_start])
+
+            region_cm.pop(idx_start)
+            region_radius.pop(idx_start)
+            
+            via_points.append(region_cm[0])
+            path_radius.append(region_radius[0])
+
+        else:          
+            via_points = []
+            path_radius = []
+
+            d_current = list(np.linalg.norm((np.array(region_cm) - current_pose), axis = 1))
+            idx_start = d_current.index(min(d_current))
+            current_pose = np.array(region_cm[idx_start])
+
+            via_points.append(region_cm[idx_start])
+            path_radius.append(region_radius[idx_start])
+
+            region_cm.pop(idx_start)
+            region_radius.pop(idx_start)
+
+            d_end = list(np.linalg.norm((np.array(region_cm) - end_pose), axis = 1))
+            idx_end = d_end.index(min(d_end))
+
+            end_pose = np.array(region_cm[idx_end])
+            end_radius = region_radius[idx_end]
+
+            region_cm.pop(idx_end)
+            region_radius.pop(idx_end)
+
+            # # search all possible path in each area
+            # n = len(region_cm)
+            # node = [i for i in range(n)]
+            # k = 0
+            # possible_path = [-1]
+            # while k <= n-1:
+            #     temp_graph = []
+                
+            #     if type(possible_path[0]) == int:                
+            #         dis_list = list(np.linalg.norm((np.array(region_cm) - current_pose), axis = 1))
+            #         sorted_list = sorted(dis_list)
+            #         neighbor_list = [[dis_list.index(sorted_list[i])] for i in range(2)]
+            #         temp_graph = np.concatenate((matlib.repmat(possible_path[0], len(neighbor_list),1), neighbor_list), axis = 1)
+            #     else: 
+            #         graph_i = []
+            #         for i in range(len(possible_path)):
+            #             dis_list = list(np.linalg.norm((np.array(region_cm) - np.array(region_cm[possible_path[i][-1]])), axis = 1))
+            #             sorted_list = sorted(dis_list)
+            #             neighbor_list = []
+            #             for j in range(len(region_cm)):
+            #                 if dis_list.index(sorted_list[j]) not in possible_path[i] and len(neighbor_list) < 2:
+            #                     neighbor_list.append([dis_list.index(sorted_list[j])])
+
+            #             graph_i = np.concatenate((matlib.repmat(possible_path[i], len(neighbor_list), 1), neighbor_list),axis = 1)
+
+            #             if i == 0:
+            #                 temp_graph = graph_i
+            #             else:
+            #                 temp_graph = np.concatenate((temp_graph, graph_i))
+
+            #     possible_path = temp_graph
                 
 
+            #     k = k+1 
 
-    def viaPointGenerator(self, Coordinates, start_pose, end_pose):
-        radius = self.radius
-        via_points = []
-        region_radius = []
+            # dis = []
+            # for path_i in possible_path:
+            #     temp_dis = 0
+            #     for j in range(1, len(path_i)):
+            #         if j == 1:
+            #             temp_dis = temp_dis + np.linalg.norm((current_pose - np.array(region_cm[path_i[j]])))
+            #         elif j == len(path_i)-1:
+            #             temp_dis = temp_dis + np.linalg.norm((np.array(region_cm[path_i[j]]) - end_pose))
+            #         elif j != 1 and j != len(path_i)-1:
+            #             temp_dis = temp_dis + np.linalg.norm((region_cm[path_i[j]] - region_cm[path_i[j+1]]))
+            #     dis.append(temp_dis)
 
+            # candidate = possible_path[dis.index(min(dis))]
+            # for i in candidate:
+            #     if i != -1:
+            #         via_points.append(region_cm[i])
+            #         path_radius.append(region_radius[i])
+              
+            # via_points.append(end_pose)
+            # path_radius.append(end_radius)
 
-        return [via_points, region_radius]
+            while len(region_cm) > 0:
+                # d_current = list(np.linalg.norm((np.array(region_cm) - current_pose), axis = 1)**2 + 0.5*(np.linalg.norm((np.array(region_cm) - end_pose), axis = 1)**2))
+                d_current = list(np.linalg.norm((np.array(region_cm) - current_pose), axis = 1))
+                idx_next = d_current.index(min(d_current))
+
+                via_points.append(region_cm[idx_next])
+                path_radius.append(region_radius[idx_next])
+
+                current_pose = np.array(region_cm[idx_next])
+
+                region_cm.pop(idx_next)
+                region_radius.pop(idx_next)
+
+            via_points.append(end_pose)
+            path_radius.append(end_radius)
+            
+                
+        return [via_points, path_radius]
     
+    def coverage_points(self, vertices_i):
+        radius = self.radius
+        cm = self.centroid(vertices_i)
+        vertices = vertices_i[: -1]
+
+        if any([i > radius**2 for i in [sum(np.subtract(ver,cm)**2) for ver in vertices]]):
+            sub_poly = self.cutPolyMinor(vertices)
+            s_1 = sub_poly[0]
+            s_2 = sub_poly[1]
+            [polygon_1, region_cm_1, region_radius_1] = self.coverage_points(s_1)
+            [polygon_2, region_cm_2, region_radius_2] = self.coverage_points(s_2)
+            cm_1 = self.centroid(sub_poly[0])
+            cm_2 = self.centroid(sub_poly[1])
+            
+            if cm_1[0] < cm_2[0]:
+                polygons = np.concatenate((polygon_1, polygon_2), axis = 1)
+                region_cm = np.concatenate((region_cm_1, region_cm_2))
+                region_radius = np.concatenate((region_radius_1, region_radius_2))
+            else:
+                polygons = np.concatenate((polygon_2, polygon_1), axis = 1)
+                region_cm = np.concatenate((region_cm_2, region_cm_1))
+                region_radius = np.concatenate((region_radius_2, region_radius_1))
+                
+            
+        else:
+            actual_radius_list = [np.sqrt(sum(np.subtract(ver,cm)**2)) for ver in vertices]
+            idx = actual_radius_list.index(max(actual_radius_list))
+            actual_radius = actual_radius_list[idx]
+            polygons = [vertices]
+            region_cm = [cm]
+            region_radius = [actual_radius]
+
+        return [polygons, region_cm, region_radius]
+
+    def cutPolyMinor(self, vertices_i):
+        vertices = np.transpose(vertices_i)
+        cm = self.centroid(vertices_i)
+        center = np.array([[cm[0]], [cm[1]]])
+        dp = vertices - center
+        xxyy = [sum(dp[0]**2), sum(dp[1]**2)]
+        xy = sum(dp[0]*dp[1])
+        I = [[xxyy[0], xy], [xy, xxyy[1]]]
+        V = np.linalg.eigh(I)[1]
+        theta_cut = -np.arctan2(V[0][0],V[1][0])
+        rho_cut = np.cos(theta_cut)*center[0][0] + np.sin(theta_cut)*center[1][0]
+        
+        edge_temp = [ i for i in range(1, len(vertices[0])+1)]
+        edge = np.transpose([edge_temp, edge_temp[1:] + edge_temp[:1]])
+
+        sub_g = nx.Graph()
+        sub_g_dict = {}
+
+        # create nodes and edges
+        for i in range(1, len(vertices[0])+1):
+            sub_g.add_node(i, Coordinate = [vertices[0][i-1], vertices[1][i-1]] )
+            sub_g.add_edge(edge[i-1][0], edge[i-1][1], label = i)
+            sub_g_dict[i] = edge[i-1]
+
+        num_ver = len(vertices[0])
+        start_ver = 0
+        next_idx = start_ver
+        sub_poly = []
+        for i in range(2):
+            current_ver = next_idx
+            loop_break = False
+            coordinate = np.transpose(vertices)
+            ver_list_minus = [coordinate[current_ver]]
+
+            # search clock-wise until meets intersection
+            while not loop_break:
+                if current_ver != 0:
+                    idx = current_ver - 1
+                else:
+                    idx = num_ver-1
+
+                current = coordinate[current_ver]
+                look_ahead = coordinate[idx]
+                theta_look_ahead = -np.arctan2(look_ahead[0]-current[0], look_ahead[1]-current[1])
+                rho_look_ahead = np.cos(theta_look_ahead)*current[0] + np.sin(theta_look_ahead)*current[1]
+
+                A = [[np.cos(theta_look_ahead), np.sin(theta_look_ahead)], [np.cos(theta_cut), np.sin(theta_cut)]]
+                b = [[rho_look_ahead], [rho_cut]]
+
+                if (abs(theta_look_ahead-theta_cut) < 0.00000001) or (abs(abs(theta_cut-theta_look_ahead)-np.pi)<0.00000001):
+                    ver_list_minus.append(look_ahead)
+                    current_ver = idx
+                else:
+                    cut_intersect = np.matmul(np.linalg.inv(A),b)
+                    if np.linalg.norm(cut_intersect-current) < 0.00000001:
+                        loop_break = True
+                    else:
+                        cut_direction = -np.arctan2(cut_intersect[0]-current[0],cut_intersect[1]-current[1])
+                        if np.cos(cut_direction-theta_look_ahead)<0:
+                            ver_list_minus.append(look_ahead)
+                            current_ver = idx
+                        else:
+                            distance_look_ahead = sum((look_ahead-current)**2)
+                            distance_cut = sum((np.transpose(cut_intersect)-current)[0]**2)
+                            if distance_cut <= distance_look_ahead:
+                                ver_list_minus.append(np.transpose(cut_intersect)[0])
+                                loop_break = True
+                            else:
+                                ver_list_minus.append(look_ahead)
+                                current_ver = idx
+            
+            current_ver = next_idx
+            loop_break = False
+            coordinate = np.transpose(vertices)
+            ver_list_plus = [coordinate[current_ver]]
+
+            while not loop_break:
+                if current_ver != num_ver-1:
+                    idx = current_ver + 1
+                else:
+                    idx = 0
+
+                current = coordinate[current_ver]
+                look_ahead = coordinate[idx]
+                theta_look_ahead = -np.arctan2(look_ahead[0]-current[0], look_ahead[1]-current[1])
+                rho_look_ahead = np.cos(theta_look_ahead)*current[0] + np.sin(theta_look_ahead)*current[1]
+
+                A = [[np.cos(theta_look_ahead), np.sin(theta_look_ahead)], [np.cos(theta_cut), np.sin(theta_cut)]]
+                b = [[rho_look_ahead], [rho_cut]]
+
+                if (abs(theta_look_ahead-theta_cut) < 0.00000001) or (abs(abs(theta_cut-theta_look_ahead)-np.pi)<0.00000001):
+                    ver_list_plus.append(look_ahead)
+                    current_ver = idx
+                else:
+                    cut_intersect = np.matmul(np.linalg.inv(A),b)
+                    cut_direction = -np.arctan2(cut_intersect[0]-current[0],cut_intersect[1]-current[1]) 
+                    if np.cos(cut_direction-theta_look_ahead)<0:
+                        ver_list_plus.append(look_ahead)
+                        current_ver = idx
+                    else:
+                        distance_look_ahead = sum((look_ahead-current)**2)
+                        distance_cut = sum((np.transpose(cut_intersect)-current)[0]**2)
+                        if (distance_cut <= distance_look_ahead) or (abs(distance_cut-distance_look_ahead) < 0.00000000001) and np.linalg.norm(cut_intersect-current) > 0.00000001:
+                            ver_list_plus.append(np.transpose(cut_intersect)[0])
+                            loop_break = True
+                            if np.linalg.norm(distance_cut-distance_look_ahead) < 0.00000001:
+                                if idx != num_ver-1:
+                                    next_idx = idx+1
+                                else:
+                                    next_idx = 0
+                            else:
+                                next_idx = idx
+                        else:
+                            ver_list_plus.append(look_ahead)
+                            current_ver = idx
+        
+            sub_poly.append(ver_list_minus[1:][::-1] + ver_list_plus)
+
+        return sub_poly
+
     def generate_areaPath(self):
         k = 1
         current_graph = [self.start_area]
         candidate = []
-        max_iter = 4
+        max_iter = 3
 
         while True:
             while (k <= max_iter):
@@ -370,8 +675,66 @@ class coveragePathPlanning(infrastructureGraph):
         self.area_path = path_n
         self.clean_path = path_clean
         self.mid_edge_path_idx = [[self.mid_edges_graph._node[y]['edge_Number'] for y in self.mid_edges_graph._node].index(x)+1 for x in mid_edge_path]
-               
+
+        print('finish generated area paths\n')
+        print(self.area_path)
+        print(self.clean_path)
+
         return None
+
+    def visualize_path(self):
+        if self.VISUAL:
+            self.fig = plt.figure()
+            self.ax = plt.axes()
+            self.line, = self.ax.plot([],[], '--b', lw = 2)
+
+            for i in self.wall_edges_dict:
+                wall_i = self.wall_edges_dict[i]
+                points = [self.wall_graph._node[wall_i[0]]['Coordinates'], self.wall_graph._node[wall_i[1]]['Coordinates']]
+                if self.wall_graph[wall_i[0]][wall_i[1]]['isWall'] == 1:
+                    c = 'k'
+                else:
+                    c = '--r'
+                
+                plt.plot([points[0][0], points[1][0]], [points[0][1], points[1][1]], c)
+
+                # point_mid = self.wall_graph[wall_i[0]][wall_i[1]]['midEdge']
+                # plt.plot(point_mid[0], point_mid[1], 'k.')
+                # plt.text(point_mid[0], point_mid[1], str(i))
+                
+            for i in self.area_graph._node:
+                plt.text(self.area_graph._node[i]['centroid'][0], self.area_graph._node[i]['centroid'][1], str(i))
+                for j in self.area_graph._node[i]['actual_vertices']:
+                    x = self.wall_graph._node[j]['Coordinates'][0]
+                    y = self.wall_graph._node[j]['Coordinates'][1]
+                    # plt.plot(x, y, 'b*')
+
+            anim = animation.FuncAnimation(self.fig, self.animate, init_func = self.init_animate, frames = len(self.robot_path), interval = 800, blit = False)
+            plt.axis('equal')
+            plt.show()
+    
+    def init_animate(self):
+        self.line.set_data([],[])
+        return self.line,
+
+    def animate(self, i):
+        p_i = self.robot_path[i]
+        cir = plt.Circle((p_i[0], p_i[1]), self.robot_clean_radius[i], color = 'yellow')
+        plt.plot(p_i[0], p_i[1], '*k')
+        self.ax.add_artist(cir)
+        
+        if i != len(self.robot_path)-1:
+            p_i_p = self.robot_path[i+1]
+            self.line.set_data([p_i[0], p_i_p[0]], [p_i[1], p_i_p[1]])
+        if i != 0:
+            p_i_m = self.robot_path[i-1]
+            # plt.plot([[p_i_m][0], p_i[0]], [p_i_m[1], p_i[1]], '--k')
+
+        return self.line,
+                
+
+def PolyArea(x,y):
+    return 0.5*np.abs(np.dot(x,np.roll(y,1))-np.dot(y,np.roll(x,1)))
 
 def inpolygon(xq, yq, xv, yv):
     shape = xq.shape
@@ -388,16 +751,25 @@ if __name__ == "__main__":
 #----------------data from user interface--------------------------------------------------------------------------#
  
 # vertices (selected points)
-    x = [-75, -75, -75+110, -75+110, -75+110, -75+110, -75+110,  -75+110+45, -75+110+45, -75+110+45, -75+110+45, -75+110+50, -75+110+50, -75+110+50, -75+100+45+22, -75+100+45+22, -75+110+50+25, -75+110+50+25+45, -75+110+50+80, -75+110+192-40, -75+110+192-40, -75+110+192-40, -75+110+192, -75+110+192, -75+110+192, -75+110+192, -75+110+192+550, -75+110+192+550]
-    y = [10-40, 10, 10-40, 10, 10-40+100, 10-40+100+50, 10-40+100+50+562, 10-40+100+50, 10-40+100+50+45, 10-40+100+50+45+50, 10-40+100+50+562, 10-40, 10-40+60, 10-40+100, 10-40+100+50+45, 10-40+100+50+45+50, 10-40, 10-40-45, 10-40+60-50, 10-40-45, 10-40+60-50, 10-40+100, 10-40-45, 10-40, 10-40+100, 10-40+150, 10-40-45, 10-40]
+    x = [0, 2, -4, 2, -4,  2,  2, 0.5,  7, 14, 20.5, 22.5, 22.5, 16.5,   9,  4.5, 5, 8.5, 10.5, 7, 11.5, 14.5, 14, 18.5, 18.5, 16, 11.5, 11.5]
+    y = [0, 4,  6, 9, 11, 12, 14,  17, 18, 18, 14.5,  8.5,  2.5, -1.5, -1.5, 1.5, 6,   3,    5, 9,   10,  5.5,  2,    2,  7.5, 11,   14,   12]
+
+    p = np.array([x,y])
+
+    # x = [-75, -75, -75+110, -75+110, -75+110, -75+110, -75+110,  -75+110+45, -75+110+45, -75+110+45, -75+110+45, -75+110+50, -75+110+50, -75+110+50, -75+100+45+22, -75+100+45+22, -75+110+50+25, -75+110+50+25+45, -75+110+50+80, -75+110+192-40, -75+110+192-40, -75+110+192-40, -75+110+192, -75+110+192, -75+110+192, -75+110+192, -75+110+192+550, -75+110+192+550]
+    # y = [10-40, 10, 10-40, 10, 10-40+100, 10-40+100+50, 10-40+100+50+562, 10-40+100+50, 10-40+100+50+45, 10-40+100+50+45+50, 10-40+100+50+562, 10-40, 10-40+60, 10-40+100, 10-40+100+50+45, 10-40+100+50+45+50, 10-40, 10-40-45, 10-40+60-50, 10-40-45, 10-40+60-50, 10-40+100, 10-40-45, 10-40, 10-40+100, 10-40+150, 10-40-45, 10-40]
     # x = np.array([-8, -4, 0, 2,  0,  -5,  5, 10,  3,   4,  6, 11, 17,  13, 21])
     # y = np.array([ 5, 0, 9, 5, -4, -10, -1,  2, -8, -15, -6, -8,  4, -15, -5])
-    p = np.array([x, y])*4/90
+    # p = np.array([x, y])*4/90
 
 # connectivity edges (drag and draw)
-    s =      [1, 1, 2, 3, 3, 4, 5, 5,  6, 6, 7,  8, 8,  9,  9,  10, 10, 12, 12, 13, 13, 14, 15, 17, 17, 18, 19, 20, 20, 21, 22, 23, 23, 24, 24, 25, 27]
-    t =      [2, 3, 4, 4,12, 5, 6, 14, 7, 8, 11, 9, 26, 10, 15, 11, 16, 13, 17, 14, 19, 22, 16, 18, 19, 20, 21, 21, 23, 22, 25, 24, 27, 25, 28, 26, 28]
-    isWall = [1, 1, 1, 0, 1, 1, 1, 0,  1, 0, 1,  1, 1,  0,  1,  1,  1,  0,  1,  1,  1,  1,  1,  1,  0,  1,  1,  0,  1,  1,  0,  0,  1,  1,  1,  1,  1]
+    s =      [1, 1,  1, 2, 2,  2, 3, 3, 4, 4,  4, 5, 5, 6,  6,  6, 7,  7, 8,  9,  9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 16, 17, 18, 19, 19, 19, 20, 20, 21, 21, 21, 22, 23, 24, 25, 26, 27]
+    t =      [2, 3, 16, 3, 4, 17, 4, 5, 5, 6, 20, 7, 8, 7, 20, 28, 8, 27, 9, 10, 27, 11, 27, 12, 26, 13, 25, 14, 24, 15, 23, 16, 18, 17, 18, 19, 20, 22, 23, 21, 28, 22, 26, 28, 23, 24, 25, 26, 27, 28]
+    isWall = [0, 1,  1, 0, 1,  1, 0, 1, 0, 0,  1, 0, 1, 1,  0,  1, 0,  1, 1,  1,  0,  1,  0,  1,  0,  1,  0,  1,  0,  1,  0,  1,  0,  0,  1,  1,  1,  0,  0,  0,  0,  1,  1,  0,  1,  1,  1,  1,  0,  1]
+    
+    # s =      [1, 1, 2, 3, 3, 4, 5, 5,  6, 6, 7,  8, 8,  9,  9,  10, 10, 12, 12, 13, 13, 14, 15, 17, 17, 18, 19, 20, 20, 21, 22, 23, 23, 24, 24, 25, 27]
+    # t =      [2, 3, 4, 4,12, 5, 6, 14, 7, 8, 11, 9, 26, 10, 15, 11, 16, 13, 17, 14, 19, 22, 16, 18, 19, 20, 21, 21, 23, 22, 25, 24, 27, 25, 28, 26, 28]
+    # isWall = [1, 1, 1, 0, 1, 1, 1, 0,  1, 0, 1,  1, 1,  0,  1,  1,  1,  0,  1,  1,  1,  1,  1,  1,  0,  1,  1,  0,  1,  1,  0,  0,  1,  1,  1,  1,  1]
 
     # s = np.array([1, 1, 2, 2, 2, 3, 4, 4, 5, 5, 5,  6, 7,  7,  8,  8,  9,  9, 10, 10, 11, 12, 12, 13])
     # t = np.array([2, 3, 4 ,5 ,6 ,4, 7, 8, 6, 7, 9, 10, 8, 11, 12, 13, 10, 11, 12, 14, 12, 14, 15, 15])
@@ -406,12 +778,16 @@ if __name__ == "__main__":
     con_e = np.array([s, t])
 
 # selected_areas (consecutive_edges only)
-    area_edges = np.array([[2, 4, 3, 1],[5, 18, 20, 8, 6, 4],[8, 22, 31, 36, 13, 10, 7],[10, 12, 14, 16, 11, 9],[15, 23, 17, 14],[19, 25, 21, 18],[24, 26, 28, 27, 25],[29, 32, 34, 31, 30, 28],[33, 37, 35, 32]])
+    area_edges = np.array([[1,4,2],[4,5,7],[7,9,8],[9,10,14,12],[12,17,13],[17,18,21,19],[21,23,20],[23,49,25,22],[25,48,27,24],[27,47,29,26],[29,46,31,28],[31,39,36,33,30],[33,35,34,32],[34,6,1,3],[39,45,38],[38,42,40,37],[40,44,41],[41,16,15],[11,15,10],[44,43,49,50]])
+    # area_edges = np.array([[2, 4, 3, 1],[5, 18, 20, 8, 6, 4],[8, 22, 31, 36, 13, 10, 7],[10, 12, 14, 16, 11, 9],[15, 23, 17, 14],[19, 25, 21, 18],[24, 26, 28, 27, 25],[29, 32, 34, 31, 30, 28],[33, 37, 35, 32]])
     # area_edges = np.array([[1, 3, 6, 2], [3, 4, 10, 7], [4, 5, 9], [7, 13, 8], [9, 12, 17, 11], [13, 14, 21, 15], [17, 19, 21, 18], [19, 20, 22], [15, 23, 24, 16]])
     
 # connectivity areas (drag and draw)
-    s = [1, 2, 2, 3, 3, 4, 6, 7, 8]
-    t = [2, 3, 6, 4, 8, 5, 7, 8, 9]
+    s = [1,  1, 2, 3, 4,  4, 5, 6, 8,  8,  9, 10, 11, 12, 12, 13, 15, 16, 17, 17, 18]
+    t = [2, 14, 3, 4, 5, 19, 6, 7, 9, 20, 10, 11, 12, 13, 15, 14, 16, 17, 18, 20, 19]
+
+    # s = [1, 2, 2, 3, 3, 4, 6, 7, 8]
+    # t = [2, 3, 6, 4, 8, 5, 7, 8, 9]
 
     # s = [1, 2, 2, 3, 4, 5, 6, 6, 7]
     # t = [2, 3, 4, 5, 6, 7, 7, 9, 8]
@@ -420,8 +796,7 @@ if __name__ == "__main__":
 #----------------------------------Construction Graph---------------------------------------------------------------#
     CPP = coveragePathPlanning(p, con_e, isWall, area_edges, con_a, True)
     CPP.initialize_graphs()
-    CPP.generate_robotWorkFlowPath([-0.9, -0.4], [2.5, 9], [2, 3, 4, 5, 8, 9])
-    # CPP.generate_areaPath()
-    CPP.visualize_area()
+    # CPP.visual_area()
+    CPP.generate_robotWorkFlowPath([0, 3], [11, 7], [1, 3, 2, 9, 6, 14, 12, 16])
        
     print("")

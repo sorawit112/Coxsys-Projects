@@ -11,7 +11,7 @@ isSelected = [2 3 4 5  8 9];
 % goal_pose = [2,1];
 
 start_pose = [-0.9 -0.4];
-goal_pose = [6, -1]; % select goal location
+goal_pose = [7, -2]; % select goal location
 
 % detect area for start pose and goal pose
 i = 1;

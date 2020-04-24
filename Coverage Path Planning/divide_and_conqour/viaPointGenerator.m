@@ -5,6 +5,7 @@ if ~isempty(varargin)
 end
 
 [polygons,region_cm,region_radius] = coverage_points(vertices,radius);
+
 d_current = region_cm-current_pose;
 d_end = region_cm-end_pose;
 
