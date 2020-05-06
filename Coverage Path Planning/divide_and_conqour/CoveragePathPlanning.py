@@ -1,11 +1,9 @@
-import mlrose
 import numpy as np
 from numpy import matlib
 import matplotlib.pyplot as plt
 from matplotlib import path
 import networkx as nx
 from matplotlib import animation
-from scipy.special import factorial
 import datetime
 import math
 from ortools.constraint_solver import routing_enums_pb2
@@ -137,7 +135,6 @@ class infrastructureGraph:
             actual_coordinates = [self.wall_graph._node[x]['Coordinates'] for x in actual_vertices]
             self.area_graph._node[i]['centroid'] = self.centroid(actual_coordinates)
 
-            
         return None
 
     def midEdgesGraphInit(self):
@@ -257,7 +254,7 @@ class coveragePathPlanning(infrastructureGraph):
         print('cleaning areas : ', self.cleanning_area)
         print('generating area paths\n')
         tic = datetime.datetime.now()
-        self.generate_areaPath('bi')
+        self.generate_areaPath()
         toc = datetime.datetime.now()
         print('time search area (bi-direction) : ' + str((toc-tic).microseconds) + ' micro-seconds')
 
@@ -287,7 +284,7 @@ class coveragePathPlanning(infrastructureGraph):
                 else:
                     end_point = self.area_graph._node[self.area_path[i]]['centroid']
 
-                [via_points, region_radius] = self.viaPointGenerator([self.wall_graph._node[ver]['Coordinates'] for ver in self.area_graph._node[self.area_path[i]]['actual_vertices']], current_point, end_point, 'ort')
+                [via_points, region_radius] = self.viaPointGenerator([self.wall_graph._node[ver]['Coordinates'] for ver in self.area_graph._node[self.area_path[i]]['actual_vertices']], current_point, end_point)
 
                 time = time + self.calculate_time_kill(region_radius)
 
@@ -344,142 +341,13 @@ class coveragePathPlanning(infrastructureGraph):
         if self.VISUAL:
             self.visualize_path()
     
-    def test_viapoints_algo(self, start_pose, goal_pose, cleaning_area):
-        self.cleanning_area = cleaning_area
-        
-        start_point = start_pose
-        start_yaw = 0
-        goal_point = goal_pose
-        goal_yaw = 0
-
-        # detect area for start pose and goal pose
-        i = 1
-        flag_start = False
-        flag_goal = False
-
-        while i <= len(self.area_graph._node):
-            ver_list = self.area_graph._node[i]['actual_vertices']
-            coor = np.transpose([self.wall_graph._node[x]['Coordinates'] for x in ver_list])
-            if inpolygon(np.array([start_point[0]]), np.array([start_point[1]]), coor[0], coor[1])[0] and not flag_start:
-                self.start_area = i
-                flag_start = True
-            
-            if inpolygon(np.array([goal_point[0]]), np.array([goal_point[1]]), coor[0], coor[1])[0] and not flag_goal:
-                self.goal_area = i
-                flag_goal = True
-
-            if flag_start and flag_goal:
-                break
-
-            i = i + 1
-
-        ## generate global area path
-        print('start area : ' + str(self.start_area) + ', goal area : ' + str(self.goal_area))
-        print('cleaning areas : ', self.cleanning_area)
-        print('generating area paths\n')
-        tic = datetime.datetime.now()
-        self.generate_areaPath('bi')
-        toc = datetime.datetime.now()
-        print('time search area (bi-direction) : ' + str((toc-tic).microseconds) + ' micro-seconds')
-
-        ## generate via-points
-        num_node_path = len(self.area_path)
-        current_point = start_point
-        self.robot_path = [start_point]
-        self.robot_duration = [0]
-        self.robot_yaw = [start_yaw]
-        self.robot_qw = [yaw_to_qw(start_yaw)]
-        # self.robot_clean_status = [0]
-        self.robot_clean_radius = [0]
-
-        time = 0
-        
-        for k in range(3):
-            if k == 0:
-                algo = 'as'
-                cl = 'k--'
-            elif k == 1:
-                algo = 'ap'
-                cl = 'b--'
-            else:
-                algo = 'tsp'
-                cl = 'r--'
-
-            tic = datetime.datetime.now()
-            
-
-            for i in range(num_node_path):
-                
-                if self.clean_path[i]:
-                    if i != num_node_path-1:
-                        edge = self.wall_edges_dict[self.mid_edges_graph._node[self.mid_edge_path_idx[i]]['edge_Number']]
-                        end_point = self.wall_graph[edge[0]][edge[1]]['midEdge']
-                    else:
-                        end_point = self.area_graph._node[self.area_path[i]]['centroid']
-
-                    [via_points, region_radius] = self.viaPointGenerator([self.wall_graph._node[ver]['Coordinates'] for ver in self.area_graph._node[self.area_path[i]]['actual_vertices']], current_point, end_point, algo)
-
-                   
-                    for i in range(len(via_points)):
-                        self.robot_path.append(via_points[i])
-
-                        
-                    current_point = via_points[len(via_points)-1]
-
-                else:
-                    if i != num_node_path-1:
-                        edge = self.wall_edges_dict[self.mid_edges_graph._node[self.mid_edge_path_idx[i]]['edge_Number']]
-                        next_point = self.wall_graph[edge[0]][edge[1]]['midEdge']
-        
-                    else:
-                        next_point = self.area_graph._node[self.area_path[i]]['centroid']
-                        
-                    
-                    self.robot_path.append(list(next_point))
-                    current_point = next_point
-            
-            toc = datetime.datetime.now()
-
-            print(str(algo) + ' times : ' + str((toc-tic).microseconds) + ' micro-seconds')
-            
-            ## visualize
-            plt.subplot(int('13'+str(k+1)))
-            for i in self.wall_edges_dict:
-                wall_i = self.wall_edges_dict[i]
-                points = [self.wall_graph._node[wall_i[0]]['Coordinates'], self.wall_graph._node[wall_i[1]]['Coordinates']]
-                if self.wall_graph[wall_i[0]][wall_i[1]]['isWall'] == 1:
-                    c = 'k'
-                else:
-                    c = '--g'
-                
-                plt.plot([points[0][0], points[1][0]], [points[0][1], points[1][1]], c)
-                
-            for i in self.area_graph._node:
-                plt.text(self.area_graph._node[i]['centroid'][0], self.area_graph._node[i]['centroid'][1], str(i))
-            
-            dist = 0
-            for i in range(len(self.robot_path)-1):
-                node_1 = self.robot_path[i]
-                node_2 = self.robot_path[i+1]
-                dist += np.linalg.norm(np.array(node_1) - np.array(node_2))
-                if i == len(self.robot_path)-2:
-                    plt.plot(node_1[0], node_1[1], '+k')
-                    plt.plot(node_2[0], node_2[1], '+k')
-                else:
-                    plt.plot(node_1[0], node_1[1], '+k')
-                    plt.plot([node_1[0], node_2[0]], [node_1[1], node_2[1]], cl)
-            print('distance : ' + str(dist))
-            plt.axis('equal')
-            
-        plt.show()  
-
 ##############################################################################################################################
 #####                                                                                                                    #####
 #####                                          coverage path planning part                                               #####
 #####                                                                                                                    #####
 ##############################################################################################################################
 
-    def viaPointGenerator(self, vertices, current_pose, end_pose, typeSearch):
+    def viaPointGenerator(self, vertices, current_pose, end_pose):
         [polygon, region_cm, region_radius] = self.coverage_points(vertices)
         region_cm = list(region_cm)
         region_radius = list(region_radius)
@@ -526,276 +394,108 @@ class coveragePathPlanning(infrastructureGraph):
             region_cm.pop(idx_end)
             region_radius.pop(idx_end)
 
-            if typeSearch.lower() == 'as':  
-                
-                while len(region_cm) > 0:
-                    # d_current = list(np.linalg.norm((np.array(region_cm) - current_pose), axis = 1)**2 + 0.5*(np.linalg.norm((np.array(region_cm) - end_pose), axis = 1)**2))
-                    d_current = list(np.linalg.norm((np.array(region_cm) - current_pose), axis = 1))
-                    idx_next = d_current.index(min(d_current))
-
-                    via_points.append(region_cm[idx_next])
-                    path_radius.append(region_radius[idx_next])
-
-                    current_pose = np.array(region_cm[idx_next])
-
-                    region_cm.pop(idx_next)
-                    region_radius.pop(idx_next)
-
-                via_points.append(end_pose)
-                path_radius.append(end_radius)
+            data = {}
+            data['location'] = [tuple(current_pose)]
+            for i in region_cm:
+                data['location'] += [tuple(i)]
             
-            elif typeSearch.lower() == 'ap':
-                # search all possible path in each area
-                n = len(region_cm)
-                node = [i for i in range(n)]
-                k = 0
-                possible_path = [-1]
-                while k <= n-1:
-                    temp_graph = []
-                    
-                    if type(possible_path[0]) == int:                
-                        dis_list = list(np.linalg.norm((np.array(region_cm) - current_pose), axis = 1))
-                        sorted_list = sorted(dis_list)
-                        neighbor_list = [[dis_list.index(sorted_list[i])] for i in range(2)]
-                        temp_graph = np.concatenate((matlib.repmat(possible_path[0], len(neighbor_list),1), neighbor_list), axis = 1)
-                    else: 
-                        graph_i = []
-                        for i in range(len(possible_path)):
-                            dis_list = list(np.linalg.norm((np.array(region_cm) - np.array(region_cm[possible_path[i][-1]])), axis = 1))
-                            sorted_list = sorted(dis_list)
-                            neighbor_list = []
-                            for j in range(len(region_cm)):
-                                if dis_list.index(sorted_list[j]) not in possible_path[i] and len(neighbor_list) < 2:
-                                    neighbor_list.append([dis_list.index(sorted_list[j])])
+            flag_equal = 0 
 
-                            graph_i = np.concatenate((matlib.repmat(possible_path[i], len(neighbor_list), 1), neighbor_list),axis = 1)
-
-                            if i == 0:
-                                temp_graph = graph_i
-                            else:
-                                temp_graph = np.concatenate((temp_graph, graph_i))
-
-                    possible_path = temp_graph
-                    
-                    k = k+1 
-
-                dis = []
-                for path_i in possible_path:
-                    temp_dis = 0
-                    for j in range(1, len(path_i)):
-                        if j == 1:
-                            temp_dis = temp_dis + np.linalg.norm((current_pose - np.array(region_cm[path_i[j]])))
-                        elif j == len(path_i)-1:
-                            temp_dis = temp_dis + np.linalg.norm((np.array(region_cm[path_i[j]]) - end_pose))
-                        elif j != 1 and j != len(path_i)-1:
-                            temp_dis = temp_dis + np.linalg.norm((region_cm[path_i[j]] - region_cm[path_i[j+1]]))
-                    dis.append(temp_dis)
-
-                candidate = possible_path[dis.index(min(dis))]
-                for i in candidate:
-                    if i != -1:
-                        via_points.append(region_cm[i])
-                        path_radius.append(region_radius[i])
-                
-                via_points.append(end_pose)
-                path_radius.append(end_radius)
-
-            elif typeSearch.lower() == 'gne':
-                # create coordinate list
-                cord_list = [tuple(current_pose)]
-                for i in region_cm:
-                    cord_list += [tuple(i)]
-                
-                flag_equal = 0
-                
-                if idx_start == idx_end:
-                    flag_equal = 1
-                    
-                cord_list += [tuple(end_pose), (float("inf"), float("inf"))]
-
-                # print('start', current_pose)
-                # print('cm', region_cm)
-                # print('end', end_pose)
-                # print('cord_list', cord_list)
-
-                dist_list = []
-                for i in range(len(cord_list)-1):
-                    node_1 = np.array(list(cord_list[i]))
-                    for j in range(i+1, len(cord_list)):
-                        node_2 = np.array(list(cord_list[j]))
-                        if j != len(cord_list)-1:
-
-                            if flag_equal:  ## start and end is a same point so dist close to zero
-                                if i == 0 and j == len(cord_list)-2:
-                                    dist_i = 0.0000000000000000000000001
-                                else:
-                                    dist_i = np.linalg.norm(node_1-node_2)
-                            else:
-                                dist_i = np.linalg.norm(node_1-node_2)
-                        else:
-                            if i == 0 or i == len(cord_list)-2:  ## constraint dummy point dist between start and end as zero otherwise infinity
-                                dist_i = 0.0000000000000000000000001
-                            else:
-                                dist_i = float("inf")
-
-                        dist_list += [(i,j,dist_i)]
-
-                # print('dist_list', dist_list)
-
-                fitness_dists = mlrose.TravellingSales(distances = dist_list)
-
-                problem_fit = mlrose.TSPOpt(length = len(cord_list), fitness_fn = fitness_dists,
-                                            maximize=False)
-
-                # Solve problem using the genetic algorithm
-                best_state, best_fitness = mlrose.genetic_alg(problem_fit, pop_size = 300, mutation_prob = 0.3, 
-                                        max_attempts = 150, random_state = 3)
-
-                # print('The best state found is: ', best_state)
-
-                # print('The fitness at the best state is: ', best_fitness)
-                
-                best_state = list(best_state)
-                
-                ## sorted the sequence via-points
-                n_state = len(best_state)
-
-                ind_start = best_state.index(0)
-                ind_end = best_state.index(n_state-2)
-                ind_dummy = best_state.index(n_state-1)
-
-                if ind_dummy > 0 and ind_dummy < n_state-1:
-                    if ind_start < ind_end:
-                        ind_via_points = best_state[0:ind_start+1][::-1] + best_state[ind_end:][::-1]
-                    else: 
-                        ind_via_points = best_state[ind_start:] + best_state[0:ind_end+1]
-                elif ind_dummy == 0:
-                    if ind_start == 1:
-                        ind_via_points = best_state[1:]
-                    elif ind_start == n_state-1:
-                        ind_via_points = best_state[1:][::-1]
-                elif ind_dummy == n_state-1:
-                    if ind_start == n_state-2:
-                        ind_via_points = best_state[0:n_state-1][::-1]
-                    elif ind_start == 0:
-                        ind_via_points = best_state[0:n_state-1]
+            if idx_start == idx_end:
+                flag_equal = 1
             
-                # print('ind', ind_via_points)
-                for i in ind_via_points:
-                    if i > 0 and i < len(ind_via_points)-1:
-                        via_points.append(region_cm[i-1])
-                        path_radius.append(region_radius[i-1])
-
-                    if i == len(ind_via_points)-1:
-                        via_points.append(end_pose)
-                        path_radius.append(end_radius) 
-
-                # print('via', via_points)
-                # print('------------------------------\n')
+            data['location'] += [tuple(end_pose), (10000000000, 10000000000)]
+            data['num_vehicles'] = 1
+            data['depot'] = 1
             
-            elif typeSearch.lower() == 'ort':
-                data = {}
-                data['location'] = [tuple(current_pose)]
-                for i in region_cm:
-                    data['location'] += [tuple(i)]
-                
-                flag_equal = 0 
+            locations = data['location']
 
-                if idx_start == idx_end:
-                    flag_equal = 1
-                
-                data['location'] += [tuple(end_pose), (10000000000, 10000000000)]
-                data['num_vehicles'] = 1
-                data['depot'] = 1
-                
-                locations = data['location']
-
-                distances = {}
-                for from_counter, from_node in enumerate(locations):
-                    distances[from_counter] = {}
-                    for to_counter, to_node in enumerate(locations):
-                        if from_counter == to_counter:
-                            distances[from_counter][to_counter] = 0
-                        else:
-                            if from_counter != len(locations)-1:
-                                if to_counter != len(locations)-1:
-                                    if flag_equal:  ## start and end is a same point so dist close to zero
-                                        if from_counter == 0 and to_counter == len(locations)-2:
-                                            distances[from_counter][to_counter] = 0.0000000000000000000000001
-                                        else:
-                                            distances[from_counter][to_counter] = (int(math.hypot((from_node[0] - to_node[0]),(from_node[1] - to_node[1]))))
+            distances = {}
+            for from_counter, from_node in enumerate(locations):
+                distances[from_counter] = {}
+                for to_counter, to_node in enumerate(locations):
+                    if from_counter == to_counter:
+                        distances[from_counter][to_counter] = 0
+                    else:
+                        if from_counter != len(locations)-1:
+                            if to_counter != len(locations)-1:
+                                if flag_equal:  ## start and end is a same point so dist close to zero
+                                    if from_counter == 0 and to_counter == len(locations)-2:
+                                        distances[from_counter][to_counter] = 0.0000000000000000000000001
                                     else:
                                         distances[from_counter][to_counter] = (int(math.hypot((from_node[0] - to_node[0]),(from_node[1] - to_node[1]))))
-                                    
                                 else:
-                                    if from_counter == 0 or from_counter == len(locations)-2:  ## constraint dummy point dist between start and end as zero otherwise infinity
-                                        distances[from_counter][to_counter] = 0.0000000000000000000000001
-                                    else:
-                                        distances[from_counter][to_counter] = 10000000000
+                                    distances[from_counter][to_counter] = (int(math.hypot((from_node[0] - to_node[0]),(from_node[1] - to_node[1]))))
+                                
                             else:
-                                if to_counter == 0 or to_counter == len(locations)-2:  ## constraint dummy point dist between start and end as zero otherwise infinity
-                                        distances[from_counter][to_counter] = 0.0000000000000000000000001
+                                if from_counter == 0 or from_counter == len(locations)-2:  ## constraint dummy point dist between start and end as zero otherwise infinity
+                                    distances[from_counter][to_counter] = 0.0000000000000000000000001
                                 else:
                                     distances[from_counter][to_counter] = 10000000000
+                        else:
+                            if to_counter == 0 or to_counter == len(locations)-2:  ## constraint dummy point dist between start and end as zero otherwise infinity
+                                    distances[from_counter][to_counter] = 0.0000000000000000000000001
+                            else:
+                                distances[from_counter][to_counter] = 10000000000
 
 
-                manager = pywrapcp.RoutingIndexManager(len(data['location']), data['num_vehicles'], data['depot'])        
-                rounting = pywrapcp.RoutingModel(manager)
+            manager = pywrapcp.RoutingIndexManager(len(data['location']), data['num_vehicles'], data['depot'])        
+            rounting = pywrapcp.RoutingModel(manager)
 
-                distance_matrix = distances   
+            distance_matrix = distances   
 
-                def distance_callback(from_index, to_index):
-                    from_node = manager.IndexToNode(from_index)
-                    to_node = manager.IndexToNode(to_index)
-                    return distance_matrix[from_node][to_node] 
+            def distance_callback(from_index, to_index):
+                from_node = manager.IndexToNode(from_index)
+                to_node = manager.IndexToNode(to_index)
+                return distance_matrix[from_node][to_node] 
 
-                transit_callback_index = rounting.RegisterTransitCallback(distance_callback)
+            transit_callback_index = rounting.RegisterTransitCallback(distance_callback)
 
-                rounting.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
+            rounting.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
 
-                search_parameters = pywrapcp.DefaultRoutingSearchParameters()
-                search_parameters.first_solution_strategy = (routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC)
+            search_parameters = pywrapcp.DefaultRoutingSearchParameters()
+            search_parameters.first_solution_strategy = (routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC)
 
-                solution = rounting.SolveWithParameters(search_parameters) 
+            solution = rounting.SolveWithParameters(search_parameters) 
 
-                if solution:
-                    index = rounting.Start(0)
-                    best_state = []
-                    route_distance = 0
-                    while not rounting.IsEnd(index):
-                        best_state += [manager.IndexToNode(index)]
-                        index = solution.Value(rounting.NextVar(index))
+            if solution:
+                index = rounting.Start(0)
+                best_state = []
+                route_distance = 0
+                while not rounting.IsEnd(index):
+                    best_state += [manager.IndexToNode(index)]
+                    index = solution.Value(rounting.NextVar(index))
 
-                n_state = len(best_state)
+            n_state = len(best_state)
 
-                ind_start = best_state.index(0)
-                ind_end = best_state.index(n_state-2)
-                ind_dummy = best_state.index(n_state-1)
+            ind_start = best_state.index(0)
+            ind_end = best_state.index(n_state-2)
+            ind_dummy = best_state.index(n_state-1)
 
-                if ind_dummy > 0 and ind_dummy < n_state-1:
-                    if ind_start < ind_end:
-                        ind_via_points = best_state[0:ind_start+1][::-1] + best_state[ind_end:][::-1]
-                    else: 
-                        ind_via_points = best_state[ind_start:] + best_state[0:ind_end+1]
-                elif ind_dummy == 0:
-                    if ind_start == 1:
-                        ind_via_points = best_state[1:]
-                    elif ind_start == n_state-1:
-                        ind_via_points = best_state[1:][::-1]
-                elif ind_dummy == n_state-1:
-                    if ind_start == n_state-2:
-                        ind_via_points = best_state[0:n_state-1][::-1]
-                    elif ind_start == 0:
-                        ind_via_points = best_state[0:n_state-1]
-            
-                for i in ind_via_points:
-                    if i > 0 and i < len(ind_via_points)-1:
-                        via_points.append(region_cm[i-1])
-                        path_radius.append(region_radius[i-1])
+            if ind_dummy > 0 and ind_dummy < n_state-1:
+                if ind_start < ind_end:
+                    ind_via_points = best_state[0:ind_start+1][::-1] + best_state[ind_end:][::-1]
+                else: 
+                    ind_via_points = best_state[ind_start:] + best_state[0:ind_end+1]
+            elif ind_dummy == 0:
+                if ind_start == 1:
+                    ind_via_points = best_state[1:]
+                elif ind_start == n_state-1:
+                    ind_via_points = best_state[1:][::-1]
+            elif ind_dummy == n_state-1:
+                if ind_start == n_state-2:
+                    ind_via_points = best_state[0:n_state-1][::-1]
+                elif ind_start == 0:
+                    ind_via_points = best_state[0:n_state-1]
+        
+            for i in ind_via_points:
+                if i > 0 and i < len(ind_via_points)-1:
+                    via_points.append(region_cm[i-1])
+                    path_radius.append(region_radius[i-1])
 
-                    if i == len(ind_via_points)-1:
-                        via_points.append(end_pose)
-                        path_radius.append(end_radius)                
+                if i == len(ind_via_points)-1:
+                    via_points.append(end_pose)
+                    path_radius.append(end_radius)                
 
         return [via_points, path_radius]
     
@@ -953,108 +653,72 @@ class coveragePathPlanning(infrastructureGraph):
 
         return sub_poly
 
-    def generate_areaPath(self, typeSearch):
+    def generate_areaPath(self):
         k = 1
         candidate = []       
         max_iter = 4
 
         # bi-directional graph search
-        if typeSearch.lower() == 'bi':
+        current_graph_front = [self.start_area]
+        current_graph_back = [self.goal_area]
+        connect_graph = []
 
-            current_graph_front = [self.start_area]
-            current_graph_back = [self.goal_area]
-            connect_graph = []
+        while True:
+            while (k <= max_iter):
+                temp_graph_front = []
+                temp_graph_back = []
+                        
+                if type(current_graph_front[0]) == int: #first time boths are int
+                    neighbor_list_front = [[n] for n in self.area_graph.neighbors(current_graph_front[0])]
+                    temp_graph_front = np.concatenate((matlib.repmat(current_graph_front, len(neighbor_list_front),1), neighbor_list_front), axis = 1)
 
-            while True:
-                while (k <= max_iter):
-                    temp_graph_front = []
-                    temp_graph_back = []
-                            
-                    if type(current_graph_front[0]) == int: #first time boths are int
-                        neighbor_list_front = [[n] for n in self.area_graph.neighbors(current_graph_front[0])]
-                        temp_graph_front = np.concatenate((matlib.repmat(current_graph_front, len(neighbor_list_front),1), neighbor_list_front), axis = 1)
-
-                        neighbor_list_back = [[n] for n in self.area_graph.neighbors(current_graph_back[0])]
-                        temp_graph_back = np.concatenate((matlib.repmat(current_graph_back, len(neighbor_list_back),1), neighbor_list_back), axis = 1)
-                    else: 
-                        graph_i_front = []
-                        graph_i_back = []
-                        num_front = len(current_graph_front[0])
-                        num_back = len(current_graph_back[0])
-
-                        for i in range(len(current_graph_front)):
-                            neighbor_list_front = [[n] for n in self.area_graph.neighbors(current_graph_front[i][num_front-1])]
-                            graph_i_front = np.concatenate((matlib.repmat(current_graph_front[i], len(neighbor_list_front), 1), neighbor_list_front), axis = 1)
-                            
-                            if i == 0:
-                                temp_graph_front = graph_i_front
-                            else:
-                                temp_graph_front = np.concatenate((temp_graph_front, graph_i_front))
-                            
-                        for i in range(len(current_graph_back)):
-                            neighbor_list_back = [[n] for n in self.area_graph.neighbors(current_graph_back[i][num_back-1])]
-                            graph_i_back = np.concatenate((matlib.repmat(current_graph_back[i], len(neighbor_list_back), 1), neighbor_list_back), axis = 1)
-
-                            if i == 0:
-                                temp_graph_back = graph_i_back
-                            else:
-                                temp_graph_back = np.concatenate((temp_graph_back, graph_i_back))
-
-                    current_graph_front = temp_graph_front
-                    current_graph_back = temp_graph_back
+                    neighbor_list_back = [[n] for n in self.area_graph.neighbors(current_graph_back[0])]
+                    temp_graph_back = np.concatenate((matlib.repmat(current_graph_back, len(neighbor_list_back),1), neighbor_list_back), axis = 1)
+                else: 
+                    graph_i_front = []
+                    graph_i_back = []
+                    num_front = len(current_graph_front[0])
+                    num_back = len(current_graph_back[0])
 
                     for i in range(len(current_graph_front)):
-                        diff_list = np.subtract(current_graph_back, current_graph_front[i])
-                        end_diff_list = np.transpose(diff_list)[len(diff_list[0])-1]
-                        if set(self.cleanning_area).issubset(set(current_graph_front[i])) and current_graph_front[i][-1] == self.goal_area:
-                            candidate.append(current_graph_front[i])
-                            break
-                        if 0 in end_diff_list:
-                            zero_index_list = [x for x in range(len(end_diff_list)) if end_diff_list[x] == 0]
-                            [connect_graph.append(list(current_graph_front[i]) + list(current_graph_back[z][::-1][1:])) for z in zero_index_list]
-                    
-                    candidate += [path_list for path_list in connect_graph if set(self.cleanning_area).issubset(set(path_list))]
-                    
-                    k = k+1
+                        neighbor_list_front = [[n] for n in self.area_graph.neighbors(current_graph_front[i][num_front-1])]
+                        graph_i_front = np.concatenate((matlib.repmat(current_graph_front[i], len(neighbor_list_front), 1), neighbor_list_front), axis = 1)
+                        
+                        if i == 0:
+                            temp_graph_front = graph_i_front
+                        else:
+                            temp_graph_front = np.concatenate((temp_graph_front, graph_i_front))
+                        
+                    for i in range(len(current_graph_back)):
+                        neighbor_list_back = [[n] for n in self.area_graph.neighbors(current_graph_back[i][num_back-1])]
+                        graph_i_back = np.concatenate((matlib.repmat(current_graph_back[i], len(neighbor_list_back), 1), neighbor_list_back), axis = 1)
 
-                if len(candidate) == 0:
-                    max_iter = max_iter+1
-                else:
-                    break
+                        if i == 0:
+                            temp_graph_back = graph_i_back
+                        else:
+                            temp_graph_back = np.concatenate((temp_graph_back, graph_i_back))
 
-        # single directional graph searc
-        elif typeSearch.lower() == 'single':
-            current_graph = [self.start_area]
-            candidate = []
-            while True:
-                while (k <= max_iter):
-                    temp_graph = []
-                    
-                    if type(current_graph[0]) == int:
-                        neighbor_list = [[n] for n in self.area_graph.neighbors(current_graph[0])]
-                        temp_graph = np.concatenate((matlib.repmat(current_graph, len(neighbor_list),1), neighbor_list), axis = 1)
-                    else: 
-                        graph_i = []
-                        num = len(current_graph[0])
-                        for i in range(len(current_graph)):
-                            neighbor_list = [[n] for n in self.area_graph.neighbors(current_graph[i][num-1])]
-                            graph_i = np.concatenate((matlib.repmat(current_graph[i], len(neighbor_list), 1), neighbor_list),axis = 1)
+                current_graph_front = temp_graph_front
+                current_graph_back = temp_graph_back
 
-                            if i == 0:
-                                temp_graph = graph_i
-                            else:
-                                temp_graph = np.concatenate((temp_graph, graph_i))
+                for i in range(len(current_graph_front)):
+                    diff_list = np.subtract(current_graph_back, current_graph_front[i])
+                    end_diff_list = np.transpose(diff_list)[len(diff_list[0])-1]
+                    if set(self.cleanning_area).issubset(set(current_graph_front[i])) and current_graph_front[i][-1] == self.goal_area:
+                        candidate.append(current_graph_front[i])
+                        break
+                    if 0 in end_diff_list:
+                        zero_index_list = [x for x in range(len(end_diff_list)) if end_diff_list[x] == 0]
+                        [connect_graph.append(list(current_graph_front[i]) + list(current_graph_back[z][::-1][1:])) for z in zero_index_list]
+                
+                candidate += [path_list for path_list in connect_graph if set(self.cleanning_area).issubset(set(path_list))]
+                
+                k = k+1
 
-                    current_graph = temp_graph
-                    num = len(current_graph[0])
-                    candidate = [path_list for path_list in current_graph if (path_list[num-1] == self.goal_area) and (set(self.cleanning_area).issubset(set(path_list)))]
-                    
-                    k = k+1
-
-                if len(candidate) == 0:
-                    max_iter = max_iter+1
-                else:
-                    break
+            if len(candidate) == 0:
+                max_iter = max_iter+1
+            else:
+                break
 
         # find minimum path
         dist_path = []
@@ -1234,6 +898,7 @@ def inpolygon(xq, yq, xv, yv):
 def yaw_to_qw(yaw):
     qw = np.cos(yaw/2)
     return qw
+
 ##############################################################################################################################
 #####                                                                                                                    #####
 ##### !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!         test run Unit         !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! #####
@@ -1242,9 +907,9 @@ def yaw_to_qw(yaw):
 
 if __name__ == "__main__":
 
-#------------------------------------------------------------data from user interface--------------------------------------------------------------------------#
+    #------------------------------------------------------------data from user interface--------------------------------------------------------------------------#
  
-# vertices (selected points)
+    # vertices (selected points)
     x = [0, 2, -4, 2, -4,  2,  2, 0.5,  7, 14, 20.5, 22.5, 22.5, 16.5,   9,  4.5, 5, 8.5, 10.5, 7, 11.5, 14.5, 14, 18.5, 18.5, 16, 11.5, 11.5]
     y = [0, 4,  6, 9, 11, 12, 14,  17, 18, 18, 14.5,  8.5,  2.5, -1.5, -1.5, 1.5, 6,   3,    5, 9,   10,  5.5,  2,    2,  7.5, 11,   14,   12]
 
@@ -1260,7 +925,7 @@ if __name__ == "__main__":
     p = np.array([x,y])
     # p = np.array([x, y])*4/90
 
-# connectivity edges (drag and draw)
+    # connectivity edges (drag and draw)
     s =      [1, 1,  1, 2, 2,  2, 3, 3, 4, 4,  4, 5, 5, 6,  6,  6, 7,  7, 8,  9,  9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 16, 17, 18, 19, 19, 19, 20, 20, 21, 21, 21, 22, 23, 24, 25, 26, 27]
     t =      [2, 3, 16, 3, 4, 17, 4, 5, 5, 6, 20, 7, 8, 7, 20, 28, 8, 27, 9, 10, 27, 11, 27, 12, 26, 13, 25, 14, 24, 15, 23, 16, 18, 17, 18, 19, 20, 22, 23, 21, 28, 22, 26, 28, 23, 24, 25, 26, 27, 28]
     isWall = [0, 1,  1, 0, 1,  1, 0, 1, 0, 0,  1, 0, 1, 1,  0,  1, 0,  1, 1,  1,  0,  1,  0,  1,  0,  1,  0,  1,  0,  1,  0,  1,  0,  0,  1,  1,  1,  0,  0,  0,  0,  1,  1,  0,  1,  1,  1,  1,  0,  1]
@@ -1280,13 +945,13 @@ if __name__ == "__main__":
 
     con_e = np.array([s, t])
 
-# selected_areas (consecutive_edges only)
+    # selected_areas (consecutive_edges only)
     area_edges = np.array([[1,4,2],[4,5,7],[7,9,8],[9,10,14,12],[12,17,13],[17,18,21,19],[21,23,20],[23,49,25,22],[25,48,27,24],[27,47,29,26],[29,46,31,28],[31,39,36,33,30],[33,35,34,32],[34,6,1,3],[39,45,38],[38,42,40,37],[40,44,41],[41,16,15],[11,15,10],[44,43,49,50]])
     # area_edges = np.array([[2, 4, 3, 1],[5, 18, 20, 8, 6, 4],[8, 22, 31, 36, 13, 10, 7],[10, 12, 14, 16, 11, 9],[15, 23, 17, 14],[19, 25, 21, 18],[24, 26, 28, 27, 25],[29, 32, 34, 31, 30, 28],[33, 37, 35, 32]])
     # area_edges = np.array([[1, 3, 6, 2], [3, 4, 10, 7], [4, 5, 9], [7, 13, 8], [9, 12, 17, 11], [13, 14, 21, 15], [17, 19, 21, 18], [19, 20, 22], [15, 23, 24, 16]])
     # area_edges = np.array([s[1, 2, 4, 3], [4, 6, 7, 5], [7, 8, 10, 9]])
      
-# connectivity areas (drag and draw)
+    # connectivity areas (drag and draw)
     s = [1,  1, 2, 3, 4,  4, 5, 6, 8,  8,  9, 10, 11, 12, 12, 13, 15, 16, 17, 17, 18]
     t = [2, 14, 3, 4, 5, 19, 6, 7, 9, 20, 10, 11, 12, 13, 15, 14, 16, 17, 18, 20, 19]
 
@@ -1301,7 +966,7 @@ if __name__ == "__main__":
 
     con_a = np.array([s, t])
 
-#----------------------------------Construction Graph---------------------------------------------------------------#
+    #----------------------------------Construction Graph---------------------------------------------------------------#
     CPP = coveragePathPlanning(p, con_e, isWall, area_edges, con_a, True)
     CPP.initialize_graphs()
     # CPP.visual_area()
