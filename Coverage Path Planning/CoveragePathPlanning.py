@@ -277,7 +277,7 @@ class coveragePathPlanning(infrastructureGraph):
             
             if self.clean_path[i]:
                 if i != num_node_path-1:
-                    if self.clean_path[i+1] == 1:
+                    if self.clean_path[i+1] == 1 or i+1 >= len(self.mid_edge_path_idx):
                         edge = self.wall_edges_dict[self.mid_edges_graph._node[self.mid_edge_path_idx[i]]['edge_Number']]
                         end_point = self.wall_graph[edge[0]][edge[1]]['midEdge']
                     else:
@@ -1036,8 +1036,8 @@ if __name__ == "__main__":
     #----------------------------------Construction Graph---------------------------------------------------------------#
     CPP = coveragePathPlanning(p, con_e, isWall, area_edges, con_a, True)
     CPP.initialize_graphs()
-    CPP.visual_area()
-    CPP.generate_robotWorkFlowPath([0, 0], [0, 0 ], [2])
+    # CPP.visual_area()
+    CPP.generate_robotWorkFlowPath([0, 0], [0, 0 ], [2, 4, 14, 7 , 5])
     
     # CPP.generate_robotWorkFlowPath([0, 2.6], [6,12], [1, 2, 3, 4, 14, 15, 12, 7, 6, 10])
     
