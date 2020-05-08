@@ -1,13 +1,16 @@
-import numpy as np
-from numpy import matlib
-import matplotlib.pyplot as plt
-from matplotlib import path
-import networkx as nx
-from matplotlib import animation
-import datetime
-import math
 from ortools.constraint_solver import routing_enums_pb2
 from ortools.constraint_solver import pywrapcp
+
+from matplotlib import animation
+from matplotlib import path
+from numpy import matlib
+
+import matplotlib.pyplot as plt
+import networkx as nx
+import numpy as np
+
+import datetime
+import math
 
 ##############################################################################################################################
 #####                                                                                                                    #####
@@ -28,8 +31,6 @@ class infrastructureGraph:
 
     wall_edges_dict = {}
     area_edges_dict = {}
-
-    VISUAL = False
 
     def __init__(self, selected_points, connectivity_edges, selected_wall, selected_area_edges, connectivity_areas, visual = False):
         self.p = selected_points
@@ -192,14 +193,9 @@ class infrastructureGraph:
 ##############################################################################################################################
 
 class coveragePathPlanning(infrastructureGraph):
-    radius = 1.5    
-    
-    time_kill = 0
-    start_area = 0
-    goal_area = 0
-    cleanning_area = []
-
-    energy = 67
+    max_cleanning_radius = 1.5    
+    max_iteration_area_search = 4
+    energy_to_kill = 67
     coef = [[0.1431328927561467724],
           [-11.0300107335172262],
               [80.2553874972875],
@@ -207,12 +203,19 @@ class coveragePathPlanning(infrastructureGraph):
             [197.34549417652961],
           [-3.61325901328181954]]
 
-    area_path = []
-    clean_path = []
-    mid_edge_path_idx = []
+    
 
-    def __init__(self, selected_points, connectivity_edges, selected_wall, selected_area_edges, connectivity_areas, visual = False):
+    def __init__(self, selected_points, connectivity_edges, selected_wall, selected_area_edges, connectivity_areas, visual = False):        
         super().__init__(selected_points, connectivity_edges, selected_wall, selected_area_edges, connectivity_areas, visual)
+
+        self.time_kill = 0
+        self.start_area = 0
+        self.goal_area = 0
+
+        self.area_path = []
+        self.clean_path = []
+        self.cleanning_area = []
+        self.mid_edge_path_idx = []
 
 ##############################################################################################################################
 #####                                                                                                                    #####
@@ -404,7 +407,8 @@ class coveragePathPlanning(infrastructureGraph):
             if idx_start == idx_end:
                 flag_equal = 1
             
-            data['location'] += [tuple(end_pose), (10000000000, 10000000000)]
+            dummy_point = (10000000000,10000000000)
+            data['location'] += [tuple(end_pose), dummy_point]
             data['num_vehicles'] = 1
             data['depot'] = 1
             
@@ -500,7 +504,7 @@ class coveragePathPlanning(infrastructureGraph):
         return [via_points, path_radius]
     
     def coverage_points(self, vertices_i):
-        radius = self.radius
+        radius = self.max_cleanning_radius
         cm = self.centroid(vertices_i)
         vertices = vertices_i[: -1]
 
@@ -656,7 +660,7 @@ class coveragePathPlanning(infrastructureGraph):
     def generate_areaPath(self):
         k = 1
         candidate = []       
-        max_iter = 4
+        max_iter = self.max_iteration_area_search
 
         # bi-directional graph search
         current_graph_front = [self.start_area]
@@ -723,8 +727,17 @@ class coveragePathPlanning(infrastructureGraph):
         # find minimum path
         dist_path = []
         for candi_i in candidate:
-            path_edge = [list(set([e for e in self.area_graph._node[candi_i[x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[candi_i[x+1]]['area_edges']])))[0] for x in range(len(candi_i)-1)]
-            node_idx = [[self.mid_edges_graph._node[y]['edge_Number'] for y in self.mid_edges_graph._node].index(x)+1 for x in path_edge]
+            path_edge = [list(set([e for e in self.area_graph._node[candi_i[x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[candi_i[x+1]]['area_edges']]))) for x in range(len(candi_i)-1)]
+            filter_edge = []
+            for i in path_edge:
+                if len(i) > 1:
+                    for j in i:
+                        if not self.wall_graph[self.wall_edges_dict[j][0]][self.wall_edges_dict[j][1]]['isWall'] :
+                            filter_edge.append(j)
+                else:
+                    filter_edge.append(i[0])
+
+            node_idx = [[self.mid_edges_graph._node[y]['edge_Number'] for y in self.mid_edges_graph._node].index(x)+1 for x in filter_edge]
             dist_temp = 0
 
             for idx in range(len(node_idx)-1):
@@ -737,7 +750,7 @@ class coveragePathPlanning(infrastructureGraph):
         min_dist = min(dist_path)
         min_dist_idx = dist_path.index(min_dist)
 
-        path_n = candidate[min_dist_idx]
+        path_n = candidate[min_dist_idx]               
 
         cleanList = self.cleanning_area
         path_clean = []
@@ -747,12 +760,21 @@ class coveragePathPlanning(infrastructureGraph):
                 cleanList.pop(cleanList.index(path_n[i]))
             else:
                 path_clean.append(0)
-
-        mid_edge_path = [list(set([e for e in self.area_graph._node[path_n[x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[path_n[x+1]]['area_edges']])))[0] for x in range(len(path_n)-1)]
         
+        mid_edge_path = [list(set([e for e in self.area_graph._node[path_n[x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[path_n[x+1]]['area_edges']]))) for x in range(len(path_n)-1)]
+        
+        filter_mid_edge_path = []
+        for i in mid_edge_path:
+                if len(i) > 1:
+                    for j in i:
+                        if not self.wall_graph[self.wall_edges_dict[j][0]][self.wall_edges_dict[j][1]]['isWall'] :
+                            filter_mid_edge_path.append(j)
+                else:
+                   filter_mid_edge_path.append(i[0])
+
         self.area_path = path_n
         self.clean_path = path_clean
-        self.mid_edge_path_idx = [[self.mid_edges_graph._node[y]['edge_Number'] for y in self.mid_edges_graph._node].index(x)+1 for x in mid_edge_path]
+        self.mid_edge_path_idx = [[self.mid_edges_graph._node[y]['edge_Number'] for y in self.mid_edges_graph._node].index(x)+1 for x in filter_mid_edge_path]
 
         print('finish generated area paths\n')
         print(self.area_path)
@@ -767,10 +789,10 @@ class coveragePathPlanning(infrastructureGraph):
 
         if type(r) == list:
             for r_i in r:
-                time_i = (self.energy*100/(np.matmul((r_i ** order_list),self.coef)))[0]
+                time_i = (self.energy_to_kill*100/(np.matmul((r_i ** order_list),self.coef)))[0]
                 time += time_i
         else:
-            time = (self.energy*100/(np.matmul((r ** order_list),self.coef)))[0]
+            time = (self.energy_to_kill*100/(np.matmul((r ** order_list),self.coef)))[0]
         
         return time
 
@@ -910,8 +932,8 @@ if __name__ == "__main__":
     #------------------------------------------------------------data from user interface--------------------------------------------------------------------------#
  
     # vertices (selected points)
-    x = [0, 2, -4, 2, -4,  2,  2, 0.5,  7, 14, 20.5, 22.5, 22.5, 16.5,   9,  4.5, 5, 8.5, 10.5, 7, 11.5, 14.5, 14, 18.5, 18.5, 16, 11.5, 11.5]
-    y = [0, 4,  6, 9, 11, 12, 14,  17, 18, 18, 14.5,  8.5,  2.5, -1.5, -1.5, 1.5, 6,   3,    5, 9,   10,  5.5,  2,    2,  7.5, 11,   14,   12]
+    # x = [0, 2, -4, 2, -4,  2,  2, 0.5,  7, 14, 20.5, 22.5, 22.5, 16.5,   9,  4.5, 5, 8.5, 10.5, 7, 11.5, 14.5, 14, 18.5, 18.5, 16, 11.5, 11.5]
+    # y = [0, 4,  6, 9, 11, 12, 14,  17, 18, 18, 14.5,  8.5,  2.5, -1.5, -1.5, 1.5, 6,   3,    5, 9,   10,  5.5,  2,    2,  7.5, 11,   14,   12]
 
     # x = [-75, -75, -75+110, -75+110, -75+110, -75+110, -75+110,  -75+110+45, -75+110+45, -75+110+45, -75+110+45, -75+110+50, -75+110+50, -75+110+50, -75+100+45+22, -75+100+45+22, -75+110+50+25, -75+110+50+25+45, -75+110+50+80, -75+110+192-40, -75+110+192-40, -75+110+192-40, -75+110+192, -75+110+192, -75+110+192, -75+110+192, -75+110+192+550, -75+110+192+550]
     # y = [10-40, 10, 10-40, 10, 10-40+100, 10-40+100+50, 10-40+100+50+562, 10-40+100+50, 10-40+100+50+45, 10-40+100+50+45+50, 10-40+100+50+562, 10-40, 10-40+60, 10-40+100, 10-40+100+50+45, 10-40+100+50+45+50, 10-40, 10-40-45, 10-40+60-50, 10-40-45, 10-40+60-50, 10-40+100, 10-40-45, 10-40, 10-40+100, 10-40+150, 10-40-45, 10-40]
@@ -922,13 +944,36 @@ if __name__ == "__main__":
     # x = [1.5, 1.5, 0.3, 0.3, -0.9, -0.9, -3.1, -3.1]
     # y = [0.9, -0.3, -0.3, 0.9, 0.3, -0.9, -0.9, 0.3]
 
+    x = [   -2.868809,   -3.178729,    2.134198,    2.458878,    1.263469,    2.665492,
+            -2.662194,   -2.721227,   -2.824534,   -4.093734,   -5.23011,    -9.465694,
+            -10.86772,   -11.88603,   -13.8341,    -13.71604,   -11.16288,   -12.29926,
+            -10.86671,    -9.907436,   -9.376143,   -9.346628,   -7.487102,   -7.516618,
+            -7.35428,    -7.295245,   -8.490656,   -8.667751,   -5.273382,   -5.450479,
+            -4.181279,   -4.406027,  -14.1392,    -14.18191,   -15.1707,    -18.41749,
+            -18.90451,   -14.78699,   -14.38835,   -13.57665,   -14.00463,    -8.898319,
+            -7.378232,   -7.153488,  -12.59924,    -7.05362,    -4.515223,   -3.290298,
+            -3.231264,   -3.54458,     4.882314,    5.3103,   ]
+    y =  [  1.006395,   -3.288222,   -3.657177,    0.5193763,   0.622683,    2.851161,
+            3.279147,    2.70358,     1.640994,    1.109702,    1.19825,     1.508172,
+            1.626236,    1.773818,    2.009948,    4.194151,    3.928505,   -3.893306,
+            -3.947384,   -3.90311,    -3.932626,   -2.707702,   -2.825767,   -4.13924,
+            -0.6858368,   0.6571531,   0.7899766,  -2.707702,    0.5243301,  -0.848177,
+            -0.9219675,  -4.255771,   -2.338892,   -3.422133,   -2.639953,   -3.746814,
+            -10.55346,   -10.87814,    -5.638999,   -5.72755,   -10.90765,   -11.23233,
+            -10.39112,    -6.767299,   -5.719471,   -6.098875,   -5.877501,   -5.715162,
+            -4.696852 , -10.0242 ,   -10.54074  ,  -4.371837 ]
+
+
     p = np.array([x,y])
     # p = np.array([x, y])*4/90
 
+    # p = np.array([[-2, -1,  2,  2,  2, -1, -2, -1,  1],
+    #               [-1, -1, -1,  1,  2,  2,  2,  1,  1]])
+
     # connectivity edges (drag and draw)
-    s =      [1, 1,  1, 2, 2,  2, 3, 3, 4, 4,  4, 5, 5, 6,  6,  6, 7,  7, 8,  9,  9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 16, 17, 18, 19, 19, 19, 20, 20, 21, 21, 21, 22, 23, 24, 25, 26, 27]
-    t =      [2, 3, 16, 3, 4, 17, 4, 5, 5, 6, 20, 7, 8, 7, 20, 28, 8, 27, 9, 10, 27, 11, 27, 12, 26, 13, 25, 14, 24, 15, 23, 16, 18, 17, 18, 19, 20, 22, 23, 21, 28, 22, 26, 28, 23, 24, 25, 26, 27, 28]
-    isWall = [0, 1,  1, 0, 1,  1, 0, 1, 0, 0,  1, 0, 1, 1,  0,  1, 0,  1, 1,  1,  0,  1,  0,  1,  0,  1,  0,  1,  0,  1,  0,  1,  0,  0,  1,  1,  1,  0,  0,  0,  0,  1,  1,  0,  1,  1,  1,  1,  0,  1]
+    # s =      [1, 1,  1, 2, 2,  2, 3, 3, 4, 4,  4, 5, 5, 6,  6,  6, 7,  7, 8,  9,  9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 16, 17, 18, 19, 19, 19, 20, 20, 21, 21, 21, 22, 23, 24, 25, 26, 27]
+    # t =      [2, 3, 16, 3, 4, 17, 4, 5, 5, 6, 20, 7, 8, 7, 20, 28, 8, 27, 9, 10, 27, 11, 27, 12, 26, 13, 25, 14, 24, 15, 23, 16, 18, 17, 18, 19, 20, 22, 23, 21, 28, 22, 26, 28, 23, 24, 25, 26, 27, 28]
+    # isWall = [0, 1,  1, 0, 1,  1, 0, 1, 0, 0,  1, 0, 1, 1,  0,  1, 0,  1, 1,  1,  0,  1,  0,  1,  0,  1,  0,  1,  0,  1,  0,  1,  0,  0,  1,  1,  1,  0,  0,  0,  0,  1,  1,  0,  1,  1,  1,  1,  0,  1]
     
     # s =      [1, 1, 2, 3, 3, 4, 5, 5,  6, 6, 7,  8, 8,  9,  9,  10, 10, 12, 12, 13, 13, 14, 15, 17, 17, 18, 19, 20, 20, 21, 22, 23, 23, 24, 24, 25, 27]
     # t =      [2, 3, 4, 4,12, 5, 6, 14, 7, 8, 11, 9, 26, 10, 15, 11, 16, 13, 17, 14, 19, 22, 16, 18, 19, 20, 21, 21, 23, 22, 25, 24, 27, 25, 28, 26, 28]
@@ -942,18 +987,37 @@ if __name__ == "__main__":
     # t = [2, 4, 3, 4, 6, 5, 6, 8, 7, 8]
     # isWall = [0,0,0,0,0,0,0,0,0,0]
 
+    s       = [ 1 , 2,  3,  5,  1,  8,  7, 17, 16, 15, 33, 35, 36, 37, 38, 39, 39, 40, 41, 42, 43, 44, 46, 46,
+                47, 48, 50, 51, 52,  2, 14, 18, 19, 13, 20, 21, 21, 22, 23, 24, 32, 31, 30, 25, 31, 12, 11, 29,
+                26, 27,  5,  4,  8,  1, 10, 12, 14, 16, 33, 18, 40, 49, 19, 21, 28, 26, 29, 32]
+    t       = [ 2 , 3,  4,  1,  9,  7,  6,  7, 15, 33, 35, 36, 37, 38, 39, 34, 40, 41, 42, 43 ,44, 46, 45, 47,
+                48, 50, 51, 52,  3, 49, 18, 19, 13, 14, 12, 20, 22, 28, 24, 32, 31, 30, 25, 23, 10, 11, 29, 26,
+                27, 28,  4,  6,  9, 10, 11, 13, 15, 17, 34, 45, 45, 48, 20, 24, 23, 25, 30, 47]
+    isWall  = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+    
 
     con_e = np.array([s, t])
 
     # selected_areas (consecutive_edges only)
-    area_edges = np.array([[1,4,2],[4,5,7],[7,9,8],[9,10,14,12],[12,17,13],[17,18,21,19],[21,23,20],[23,49,25,22],[25,48,27,24],[27,47,29,26],[29,46,31,28],[31,39,36,33,30],[33,35,34,32],[34,6,1,3],[39,45,38],[38,42,40,37],[40,44,41],[41,16,15],[11,15,10],[44,43,49,50]])
+    # area_edges = np.array([[1,4,2],[4,5,7],[7,9,8],[9,10,14,12],[12,17,13],[17,18,21,19],[21,23,20],[23,49,25,22],[25,48,27,24],[27,47,29,26],[29,46,31,28],[31,39,36,33,30],[33,35,34,32],[34,6,1,3],[39,45,38],[38,42,40,37],[40,44,41],[41,16,15],[11,15,10],[44,43,49,50]])
     # area_edges = np.array([[2, 4, 3, 1],[5, 18, 20, 8, 6, 4],[8, 22, 31, 36, 13, 10, 7],[10, 12, 14, 16, 11, 9],[15, 23, 17, 14],[19, 25, 21, 18],[24, 26, 28, 27, 25],[29, 32, 34, 31, 30, 28],[33, 37, 35, 32]])
     # area_edges = np.array([[1, 3, 6, 2], [3, 4, 10, 7], [4, 5, 9], [7, 13, 8], [9, 12, 17, 11], [13, 14, 21, 15], [17, 19, 21, 18], [19, 20, 22], [15, 23, 24, 16]])
     # area_edges = np.array([s[1, 2, 4, 3], [4, 6, 7, 5], [7, 8, 10, 9]])
-     
+    
+    area_edges = np.array( [[1, 2, 3, 51, 4], [6, 53, 5, 4, 51, 52, 7],
+                            [9, 57, 34, 56, 46, 55, 54, 5, 53, 6, 8, 58],
+                            [10, 59, 16, 17, 61, 60, 31, 57], [13, 14, 15, 16, 59, 11, 12],
+                            [18, 19, 20, 21, 22, 23, 61],
+                            [60, 23, 24, 68, 40, 64, 36, 63, 32], [33, 63, 35, 56],
+                            [37, 64, 39, 65, 38], [50, 65, 44, 66, 49],
+                            [66, 43, 67, 48], [47, 67, 42, 45, 55],
+                            [45, 41, 68, 25, 62, 30, 1, 54], [30, 62, 26, 27, 28, 29, 2]])
+
+
     # connectivity areas (drag and draw)
-    s = [1,  1, 2, 3, 4,  4, 5, 6, 8,  8,  9, 10, 11, 12, 12, 13, 15, 16, 17, 17, 18]
-    t = [2, 14, 3, 4, 5, 19, 6, 7, 9, 20, 10, 11, 12, 13, 15, 14, 16, 17, 18, 20, 19]
+    # s = [1,  1, 2, 3, 4,  4, 5, 6, 7, 8,  8,  9, 10, 11, 12, 12, 13, 15, 16, 17, 17, 18]
+    # t = [2, 14, 3, 4, 5, 19, 6, 7, 8, 9, 20, 10, 11, 12, 13, 15, 14, 16, 17, 18, 20, 19]
 
     # s = [1, 2, 2, 3, 3, 4, 6, 7, 8]
     # t = [2, 3, 6, 4, 8, 5, 7, 8, 9]
@@ -964,13 +1028,17 @@ if __name__ == "__main__":
     # s = [1, 2]
     # t = [2, 3]
 
+    s = [ 1,  2,  3,  3,  3,  3,  4,  4,  4, 13,  7,  7,  9, 10, 11,  7]
+    t = [ 2,  3, 13, 12,  8,  4,  5,  7,  6, 14,  8,  9, 10, 11, 12, 13]
+
     con_a = np.array([s, t])
 
     #----------------------------------Construction Graph---------------------------------------------------------------#
     CPP = coveragePathPlanning(p, con_e, isWall, area_edges, con_a, True)
     CPP.initialize_graphs()
-    # CPP.visual_area()
-    CPP.generate_robotWorkFlowPath([0, 2.6], [0,6], [1, 2, 3, 4, 14, 15, 12, 7, 6])
-    # CPP.test_viapoints_algo([0, 2.6], [0,6], [1, 2, 3, 4, 14, 15, 12, 7, 6])
-
+    CPP.visual_area()
+    CPP.generate_robotWorkFlowPath([0, 0], [0, 0 ], [2])
+    
+    # CPP.generate_robotWorkFlowPath([0, 2.6], [6,12], [1, 2, 3, 4, 14, 15, 12, 7, 6, 10])
+    
     print("")
