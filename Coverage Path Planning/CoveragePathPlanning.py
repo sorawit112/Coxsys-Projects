@@ -193,7 +193,7 @@ class infrastructureGraph:
 ##############################################################################################################################
 
 class coveragePathPlanning(infrastructureGraph):
-    max_cleanning_radius = 1.5    
+    max_cleanning_radius = 1
     max_iteration_area_search = 4
     energy_to_kill = 67
     coef = [[0.1431328927561467724],
@@ -202,6 +202,8 @@ class coveragePathPlanning(infrastructureGraph):
        [-209.437642843722228422],
             [197.34549417652961],
           [-3.61325901328181954]]
+
+    animate_times = 200 #ms
 
     
 
@@ -277,7 +279,7 @@ class coveragePathPlanning(infrastructureGraph):
             
             if self.clean_path[i]:
                 if i != num_node_path-1:
-                    if self.clean_path[i+1] == 1 or i+1 >= len(self.mid_edge_path_idx):
+                    if self.clean_path[i+1] == 1 or i+1 == len(self.mid_edge_path_idx):
                         edge = self.wall_edges_dict[self.mid_edges_graph._node[self.mid_edge_path_idx[i]]['edge_Number']]
                         end_point = self.wall_graph[edge[0]][edge[1]]['midEdge']
                     else:
@@ -355,152 +357,101 @@ class coveragePathPlanning(infrastructureGraph):
         region_cm = list(region_cm)
         region_radius = list(region_radius)
 
-        if len(region_cm) == 1:
-            via_points = region_cm
-            path_radius = region_radius
+        via_points = []
+        path_radius = []
 
-        elif len(region_cm) == 2:
-            via_points = []
-            path_radius = []
+    # create location datas for ortools
+        data = {}
+        data['location'] = [tuple(current_pose)]  # add start pose
+        for i in region_cm:
+            data['location'] += [tuple(i)] # add list of possibles pose
+                
+        dummy_point = (10000000000,10000000000)
+        data['location'] += [tuple(end_pose), dummy_point] # add end pose and dummy node
+        data['num_vehicles'] = 1
+        data['depot'] = 1
+        
+        locations = data['location']
 
-            d_current = list(np.linalg.norm((np.array(region_cm) - current_pose), axis = 1))
-            idx_start = d_current.index(min(d_current))
-            via_points.append(region_cm[idx_start])
-            path_radius.append(region_radius[idx_start])
-
-            region_cm.pop(idx_start)
-            region_radius.pop(idx_start)
-            
-            via_points.append(region_cm[0])
-            path_radius.append(region_radius[0])
-
-        else:   
-            via_points = []
-            path_radius = []
-
-            d_current = list(np.linalg.norm((np.array(region_cm) - current_pose), axis = 1))
-            idx_start = d_current.index(min(d_current))
-            current_pose = np.array(region_cm[idx_start])
-
-            via_points.append(region_cm[idx_start])
-            path_radius.append(region_radius[idx_start])
-
-            region_cm.pop(idx_start)
-            region_radius.pop(idx_start)
-
-            d_end = list(np.linalg.norm((np.array(region_cm) - end_pose), axis = 1))
-            idx_end = d_end.index(min(d_end))
-
-            end_pose = np.array(region_cm[idx_end])
-            end_radius = region_radius[idx_end]
-
-            region_cm.pop(idx_end)
-            region_radius.pop(idx_end)
-
-            data = {}
-            data['location'] = [tuple(current_pose)]
-            for i in region_cm:
-                data['location'] += [tuple(i)]
-            
-            flag_equal = 0 
-
-            if idx_start == idx_end:
-                flag_equal = 1
-            
-            dummy_point = (10000000000,10000000000)
-            data['location'] += [tuple(end_pose), dummy_point]
-            data['num_vehicles'] = 1
-            data['depot'] = 1
-            
-            locations = data['location']
-
-            distances = {}
-            for from_counter, from_node in enumerate(locations):
-                distances[from_counter] = {}
-                for to_counter, to_node in enumerate(locations):
-                    if from_counter == to_counter:
-                        distances[from_counter][to_counter] = 0
-                    else:
-                        if from_counter != len(locations)-1:
-                            if to_counter != len(locations)-1:
-                                if flag_equal:  ## start and end is a same point so dist close to zero
-                                    if from_counter == 0 and to_counter == len(locations)-2:
-                                        distances[from_counter][to_counter] = 0.0000000000000000000000001
-                                    else:
-                                        distances[from_counter][to_counter] = (int(math.hypot((from_node[0] - to_node[0]),(from_node[1] - to_node[1]))))
-                                else:
-                                    distances[from_counter][to_counter] = (int(math.hypot((from_node[0] - to_node[0]),(from_node[1] - to_node[1]))))
-                                
-                            else:
-                                if from_counter == 0 or from_counter == len(locations)-2:  ## constraint dummy point dist between start and end as zero otherwise infinity
-                                    distances[from_counter][to_counter] = 0.0000000000000000000000001
-                                else:
-                                    distances[from_counter][to_counter] = 10000000000
+    # create distances matrix for ortools
+        distances = {}
+        for from_counter, from_node in enumerate(locations):
+            distances[from_counter] = {}
+            for to_counter, to_node in enumerate(locations):
+                if from_counter == to_counter:
+                    distances[from_counter][to_counter] = 0
+                else:
+                    if from_counter != len(locations)-1:
+                        if to_counter != len(locations)-1:
+                            distances[from_counter][to_counter] = (int(math.hypot((from_node[0] - to_node[0]),(from_node[1] - to_node[1]))))
                         else:
-                            if to_counter == 0 or to_counter == len(locations)-2:  ## constraint dummy point dist between start and end as zero otherwise infinity
-                                    distances[from_counter][to_counter] = 0.0000000000000000000000001
+                            if from_counter == 0 or from_counter == len(locations)-2:  ## constraint dummy point dist between start and end as zero otherwise infinity
+                                distances[from_counter][to_counter] = 0.0000000000000000000000001
                             else:
                                 distances[from_counter][to_counter] = 10000000000
-
-
-            manager = pywrapcp.RoutingIndexManager(len(data['location']), data['num_vehicles'], data['depot'])        
-            rounting = pywrapcp.RoutingModel(manager)
-
-            distance_matrix = distances   
-
-            def distance_callback(from_index, to_index):
-                from_node = manager.IndexToNode(from_index)
-                to_node = manager.IndexToNode(to_index)
-                return distance_matrix[from_node][to_node] 
-
-            transit_callback_index = rounting.RegisterTransitCallback(distance_callback)
-
-            rounting.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
-
-            search_parameters = pywrapcp.DefaultRoutingSearchParameters()
-            search_parameters.first_solution_strategy = (routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC)
-
-            solution = rounting.SolveWithParameters(search_parameters) 
-
-            if solution:
-                index = rounting.Start(0)
-                best_state = []
-                route_distance = 0
-                while not rounting.IsEnd(index):
-                    best_state += [manager.IndexToNode(index)]
-                    index = solution.Value(rounting.NextVar(index))
-
-            n_state = len(best_state)
-
-            ind_start = best_state.index(0)
-            ind_end = best_state.index(n_state-2)
-            ind_dummy = best_state.index(n_state-1)
-
-            if ind_dummy > 0 and ind_dummy < n_state-1:
-                if ind_start < ind_end:
-                    ind_via_points = best_state[0:ind_start+1][::-1] + best_state[ind_end:][::-1]
-                else: 
-                    ind_via_points = best_state[ind_start:] + best_state[0:ind_end+1]
-            elif ind_dummy == 0:
-                if ind_start == 1:
-                    ind_via_points = best_state[1:]
-                elif ind_start == n_state-1:
-                    ind_via_points = best_state[1:][::-1]
-            elif ind_dummy == n_state-1:
-                if ind_start == n_state-2:
-                    ind_via_points = best_state[0:n_state-1][::-1]
-                elif ind_start == 0:
-                    ind_via_points = best_state[0:n_state-1]
+                    else:
+                        if to_counter == 0 or to_counter == len(locations)-2:  ## constraint dummy point dist between start and end as zero otherwise infinity
+                                distances[from_counter][to_counter] = 0.0000000000000000000000001
+                        else:
+                            distances[from_counter][to_counter] = 10000000000
         
-            for i in ind_via_points:
-                if i > 0 and i < len(ind_via_points)-1:
-                    via_points.append(region_cm[i-1])
-                    path_radius.append(region_radius[i-1])
+    # ortools algorithm part
+        manager = pywrapcp.RoutingIndexManager(len(data['location']), data['num_vehicles'], data['depot'])        
+        rounting = pywrapcp.RoutingModel(manager)
 
-                if i == len(ind_via_points)-1:
-                    via_points.append(end_pose)
-                    path_radius.append(end_radius)                
+        distance_matrix = distances   
 
+        def distance_callback(from_index, to_index):
+            from_node = manager.IndexToNode(from_index)
+            to_node = manager.IndexToNode(to_index)
+            return distance_matrix[from_node][to_node] 
+
+        transit_callback_index = rounting.RegisterTransitCallback(distance_callback)
+
+        rounting.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
+
+        search_parameters = pywrapcp.DefaultRoutingSearchParameters()
+        search_parameters.first_solution_strategy = (routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC)
+
+        solution = rounting.SolveWithParameters(search_parameters) 
+
+        if solution:
+            index = rounting.Start(0)
+            best_state = []
+            route_distance = 0
+            while not rounting.IsEnd(index):
+                best_state += [manager.IndexToNode(index)]
+                index = solution.Value(rounting.NextVar(index))
+
+    # sorted to fixed start fixed stop sequence and filter dummy node out 
+        n_state = len(best_state)
+
+        ind_start = best_state.index(0)
+        ind_end = best_state.index(n_state-2)
+        ind_dummy = best_state.index(n_state-1)
+
+        if ind_dummy > 0 and ind_dummy < n_state-1:
+            if ind_start < ind_end:
+                ind_via_points = best_state[0:ind_start+1][::-1] + best_state[ind_end:][::-1]
+            else: 
+                ind_via_points = best_state[ind_start:] + best_state[0:ind_end+1]
+        elif ind_dummy == 0:
+            if ind_start == 1:
+                ind_via_points = best_state[1:]
+            elif ind_start == n_state-1:
+                ind_via_points = best_state[1:][::-1]
+        elif ind_dummy == n_state-1:
+            if ind_start == n_state-2:
+                ind_via_points = best_state[0:n_state-1][::-1]
+            elif ind_start == 0:
+                ind_via_points = best_state[0:n_state-1]
+
+    # map index to via-points
+        for i in ind_via_points:
+            if i != 0 and i != len(ind_via_points)-1:
+                via_points.append(region_cm[i-1])
+                path_radius.append(region_radius[i-1])
+            
         return [via_points, path_radius]
     
     def coverage_points(self, vertices_i):
@@ -867,7 +818,7 @@ class coveragePathPlanning(infrastructureGraph):
                     y = self.wall_graph._node[j]['Coordinates'][1]
                     # plt.plot(x, y, 'b*')
 
-            anim = animation.FuncAnimation(self.fig, self.animate, init_func = self.init_animate, frames = len(self.robot_path), interval = 800, blit = False)
+            anim = animation.FuncAnimation(self.fig, self.animate, init_func = self.init_animate, frames = len(self.robot_path), interval = self.animate_times, blit = False)
             plt.axis('equal')
             plt.show()
     
@@ -1037,7 +988,7 @@ if __name__ == "__main__":
     CPP = coveragePathPlanning(p, con_e, isWall, area_edges, con_a, True)
     CPP.initialize_graphs()
     # CPP.visual_area()
-    CPP.generate_robotWorkFlowPath([0, 0], [0, 0 ], [2, 4, 14, 7 , 5])
+    CPP.generate_robotWorkFlowPath([0, 0], [-13, 0], [1, 4, 2, 5, 10, 13])
     
     # CPP.generate_robotWorkFlowPath([0, 2.6], [6,12], [1, 2, 3, 4, 14, 15, 12, 7, 6, 10])
     
