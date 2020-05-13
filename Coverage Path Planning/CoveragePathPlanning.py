@@ -193,7 +193,7 @@ class infrastructureGraph:
 ##############################################################################################################################
 
 class coveragePathPlanning(infrastructureGraph):
-    max_cleanning_radius = 1
+    max_cleanning_radius = 1.5
     max_iteration_area_search = 4
     energy_to_kill = 67
     coef = [[0.1431328927561467724],
@@ -203,21 +203,27 @@ class coveragePathPlanning(infrastructureGraph):
             [197.34549417652961],
           [-3.61325901328181954]]
 
-    animate_times = 200 #ms
-
-    
+    animate_times = 400 #ms    
 
     def __init__(self, selected_points, connectivity_edges, selected_wall, selected_area_edges, connectivity_areas, visual = False):        
         super().__init__(selected_points, connectivity_edges, selected_wall, selected_area_edges, connectivity_areas, visual)
 
-        self.time_kill = 0
-        self.start_area = 0
-        self.goal_area = 0
+        self.time_kill = []
+        self.start_area = []
+        self.goal_area = []
 
         self.area_path = []
         self.clean_path = []
         self.cleanning_area = []
         self.mid_edge_path_idx = []
+
+        self.robot_path = []
+        self.robot_yaw = []
+        self.robot_duration = []
+        self.robot_yaw = []
+        self.robot_qw = []
+        self.robot_clean_radius = []
+        self.robot_clean_status = []
 
 ##############################################################################################################################
 #####                                                                                                                    #####
@@ -225,121 +231,98 @@ class coveragePathPlanning(infrastructureGraph):
 #####                                                                                                                    #####
 ##############################################################################################################################
 
-    def generate_robotWorkFlowPath(self, start_pose, goal_pose, cleaning_area):
-        self.cleanning_area = cleaning_area
-        
-        start_point = start_pose
-        start_yaw = 0
-        goal_point = goal_pose
-        goal_yaw = 0
-
-        # detect area for start pose and goal pose
-        i = 1
-        flag_start = False
-        flag_goal = False
-
-        while i <= len(self.area_graph._node):
-            ver_list = self.area_graph._node[i]['actual_vertices']
-            coor = np.transpose([self.wall_graph._node[x]['Coordinates'] for x in ver_list])
-            if inpolygon(np.array([start_point[0]]), np.array([start_point[1]]), coor[0], coor[1])[0] and not flag_start:
-                self.start_area = i
-                flag_start = True
-            
-            if inpolygon(np.array([goal_point[0]]), np.array([goal_point[1]]), coor[0], coor[1])[0] and not flag_goal:
-                self.goal_area = i
-                flag_goal = True
-
-            if flag_start and flag_goal:
-                break
-
-            i = i + 1
-
-        ## generate global area path
-        print('start area : ' + str(self.start_area) + ', goal area : ' + str(self.goal_area))
-        print('cleaning areas : ', self.cleanning_area)
-        print('generating area paths\n')
-        tic = datetime.datetime.now()
-        self.generate_areaPath()
-        toc = datetime.datetime.now()
-        print('time search area (bi-direction) : ' + str((toc-tic).microseconds) + ' micro-seconds')
+    def generate_robotWorkFlowPath(self, start_pose, goal_pose, cleaning_area):        
+        self.fleet_management( start_pose, goal_pose, cleaning_area)
 
         ## generate via-points
-        num_node_path = len(self.area_path)
-        current_point = start_point
-        self.robot_path = [start_point]
-        self.robot_duration = [0]
-        self.robot_yaw = [start_yaw]
-        self.robot_qw = [yaw_to_qw(start_yaw)]
-        # self.robot_clean_status = [0]
-        self.robot_clean_radius = [0]
+        n_robot = len(start_pose)
+        flag_shift = False
+        for r in range(n_robot):
+            num_node_path = len(self.area_path[r])
+            current_point = list(start_pose[r])
+            self.time_kill.append([])
+            self.robot_path.append([current_point])
+            self.robot_duration.append([0])
+            self.robot_yaw.append([0])
+            self.robot_qw.append([yaw_to_qw(0)])
+            self.robot_clean_status.append([0])
+            self.robot_clean_radius.append([0])
 
-        time = 0
+            time = 0
 
-        for i in range(num_node_path):
-            
-            if self.clean_path[i]:
-                if i != num_node_path-1:
-                    if self.clean_path[i+1] == 1 or i+1 == len(self.mid_edge_path_idx):
-                        edge = self.wall_edges_dict[self.mid_edges_graph._node[self.mid_edge_path_idx[i]]['edge_Number']]
-                        end_point = self.wall_graph[edge[0]][edge[1]]['midEdge']
-                    else:
-                        edge = self.wall_edges_dict[self.mid_edges_graph._node[self.mid_edge_path_idx[i+1]]['edge_Number']]
-                        end_point = self.wall_graph[edge[0]][edge[1]]['midEdge']
-
-                else:
-                    end_point = self.area_graph._node[self.area_path[i]]['centroid']
-
-                [via_points, region_radius] = self.viaPointGenerator([self.wall_graph._node[ver]['Coordinates'] for ver in self.area_graph._node[self.area_path[i]]['actual_vertices']], current_point, end_point)
-
-                time = time + self.calculate_time_kill(region_radius)
-
-                for i in range(len(via_points)):
-                    delta_yaw = np.arctan2(via_points[i][1]-self.robot_path[len(self.robot_path)-1][1], via_points[i][0]-self.robot_path[len(self.robot_path)-1][0])
-                    self.robot_yaw.append(delta_yaw)
-                    self.robot_qw.append(yaw_to_qw(delta_yaw))
-
-                    self.robot_path.append(via_points[i])
-                    self.robot_duration.append(self.calculate_time_kill(region_radius[i]))
-
-                    self.robot_clean_radius.append(region_radius[i])
-                    # self.robot_clean_status.append(1)
-                    
-                current_point = via_points[len(via_points)-1]
-
-            else:
-                if i != num_node_path-1:
-                    edge = self.wall_edges_dict[self.mid_edges_graph._node[self.mid_edge_path_idx[i]]['edge_Number']]
-                    next_point = self.wall_graph[edge[0]][edge[1]]['midEdge']
-    
-                else:
-                    next_point = self.area_graph._node[self.area_path[i]]['centroid']
-                    
-                delta_yaw = np.arctan2(next_point[1]-self.robot_path[len(self.robot_path)-1][1], next_point[0]-self.robot_path[len(self.robot_path)-1][0])
-                self.robot_yaw.append(delta_yaw)
-                self.robot_qw.append(yaw_to_qw(delta_yaw))
+            for i in range(num_node_path):
                 
-                self.robot_path.append(list(next_point))
-                self.robot_duration.append(0)
-                current_point = next_point
+                if self.clean_path[r][i]:
+                    if i != num_node_path-1:
+                        if self.clean_path[r][i+1] == 1 or i+1 == len(self.mid_edge_path_idx[r]):
+                            edge = self.wall_edges_dict[self.mid_edges_graph._node[self.mid_edge_path_idx[r][i]]['edge_Number']]
+                            end_point = self.wall_graph[edge[0]][edge[1]]['midEdge']
+                        else:
+                            edge = self.wall_edges_dict[self.mid_edges_graph._node[self.mid_edge_path_idx[r][i+1]]['edge_Number']]
+                            end_point = self.wall_graph[edge[0]][edge[1]]['midEdge']
 
-                self.robot_clean_radius.append(0)
-                # self.robot_clean_status.append(0)
-        
-        self.time_kill = time
+                    else:
+                        end_point = self.area_graph._node[self.area_path[r][i]]['centroid']
 
-        hours = np.floor(time/3600)
-        minutes = np.floor((time%3600)/60)
-        seconds = np.floor(time - 3600*hours - 60*minutes)
-        area = sum([self.area_graph._node[area]['area'] for area in self.area_path])
-        
-        performance = time/area
+                    [via_points, region_radius] = self.viaPointGenerator([self.wall_graph._node[ver]['Coordinates'] for ver in self.area_graph._node[self.area_path[r][i]]['actual_vertices']], current_point, end_point)
 
-        print('robot path : ' + str(len(self.robot_path)) + ' points\n')
-        for i in range(len(self.robot_path)):
-            print('via-point '+ str(i) +' : ' + str(self.robot_path[i]) + ' yaw : ' + str(self.robot_yaw[i]) +'\n' )
+                    time = time + self.calculate_time_kill(region_radius)
 
-        print('Time Spent : ' + str(hours) + ' Hours ' + str(minutes) + ' Minutes ' + str(seconds) + ' Seconds\n')
-        print('Performance : ' + str(round(performance,2)) + ' s/m^2\n')
+                    for i in range(len(via_points)):
+                        delta_yaw = np.arctan2(via_points[i][1]-self.robot_path[r][len(self.robot_path[r])-1][1], via_points[i][0]-self.robot_path[r][len(self.robot_path[r])-1][0])
+                        self.robot_yaw[r].append(delta_yaw)
+                        self.robot_qw[r].append(yaw_to_qw(delta_yaw))
+
+                        self.robot_path[r].append(via_points[i])
+                        self.robot_duration[r].append(self.calculate_time_kill(region_radius[i]))
+
+                        self.robot_clean_radius[r].append(region_radius[i])
+                        self.robot_clean_status[r].append(1)
+                        
+                    current_point = via_points[len(via_points)-1]
+
+                else:
+                    if i != num_node_path-1:
+                        if i != 0 and self.clean_path[r][i-1]:
+                            edge1 = self.wall_edges_dict[self.mid_edges_graph._node[self.mid_edge_path_idx[r][i-1]]['edge_Number']]
+                            edge2 = self.wall_edges_dict[self.mid_edges_graph._node[self.mid_edge_path_idx[r][i]]['edge_Number']]
+                            next_point = [self.wall_graph[edge1[0]][edge1[1]]['midEdge'], self.wall_graph[edge2[0]][edge2[1]]['midEdge']]
+                        
+                        else:
+                            edge = self.wall_edges_dict[self.mid_edges_graph._node[self.mid_edge_path_idx[r][i]]['edge_Number']]
+                            next_point = [self.wall_graph[edge[0]][edge[1]]['midEdge']]
+                    else:
+                        next_point = [self.area_graph._node[self.area_path[r][i]]['centroid']]
+                        
+                    for n in next_point:
+                        delta_yaw = np.arctan2(n[1]-self.robot_path[r][len(self.robot_path[r])-1][1], n[0]-self.robot_path[r][len(self.robot_path[r])-1][0])
+                        self.robot_yaw[r].append(delta_yaw)
+                        self.robot_qw[r].append(yaw_to_qw(delta_yaw))
+                        
+                        self.robot_path[r].append(list(n))
+                        self.robot_duration[r].append(0)
+                        self.robot_clean_radius[r].append(0)
+                        self.robot_clean_status[r].append(0)
+
+                    current_point = next_point[-1]
+            
+            self.time_kill[r] = time
+
+            hours = np.floor(time/3600)
+            minutes = np.floor((time%3600)/60)
+            seconds = np.floor(time - 3600*hours - 60*minutes)
+            area = sum([self.area_graph._node[area]['area'] for area in self.area_path[r]])
+            
+            performance = time/area
+
+            print('---------------------- robot number ' + str(r+1)+ ' ------------------------------\n')
+            print('robot path : ' + str(len(self.robot_path[r])) + ' points\n')
+            for i in range(len(self.robot_path[r])):
+                print('via-point '+ str(i) +' : ' + str(self.robot_path[r][i]) + ' yaw : ' + str(self.robot_yaw[r][i]) +'\n' )
+
+            print('Time Spent : ' + str(hours) + ' Hours ' + str(minutes) + ' Minutes ' + str(seconds) + ' Seconds\n')
+            print('Performance : ' + str(round(performance,2)) + ' s/m^2\n')
+            print('---------------------- done robot number ' + str(r+1)+ ' -------------------------\n')
         
         self.writeText()
 
@@ -351,7 +334,55 @@ class coveragePathPlanning(infrastructureGraph):
 #####                                          coverage path planning part                                               #####
 #####                                                                                                                    #####
 ##############################################################################################################################
+    def fleet_management(self, start_pose, goal_pose, cleaning_area):
+        n_robot = len(start_pose)
+        
+        area_cleaning = [self.area_graph._node[a]['area'] for a in cleaning_area]
+        area_cleaning_sorted = sorted(area_cleaning)[::-1]
+        avg_area = sum(area_cleaning)/len(cleaning_area)
+        
+        for r in range(n_robot):
+            start_point = start_pose[r]
+            goal_point = goal_pose[r]
 
+            # detect area for start pose and goal pose
+            i = 1
+            flag_start = False
+            flag_goal = False
+
+            while i <= len(self.area_graph._node):
+                ver_list = self.area_graph._node[i]['actual_vertices']
+                coor = np.transpose([self.wall_graph._node[x]['Coordinates'] for x in ver_list])
+                if inpolygon(np.array([start_point[0]]), np.array([start_point[1]]), coor[0], coor[1])[0] and not flag_start:
+                    self.start_area.append(i)
+                    flag_start = True
+                
+                if inpolygon(np.array([goal_point[0]]), np.array([goal_point[1]]), coor[0], coor[1])[0] and not flag_goal:
+                    self.goal_area.append(i)
+                    flag_goal = True
+
+                if flag_start and flag_goal:
+                    break
+
+                i = i + 1
+            
+            self.cleanning_area.append([cleaning_area[area_cleaning.index(area_cleaning_sorted[0])]])
+            area_cleaning_sorted.pop(0)
+
+            
+        for j in area_cleaning_sorted:
+            sum_avg_list = []
+            error_avg_list = []
+            
+            for i in range(n_robot):
+                sum_avg_list.append(sum([self.area_graph._node[a]['area'] for a in self.cleanning_area[i]]) + j)
+                error_avg_list.append(abs(avg_area - sum_avg_list[i]))
+
+            min_error = min(error_avg_list)
+            self.cleanning_area[error_avg_list.index(min_error)].append(cleaning_area[area_cleaning.index(j)])
+
+        self.generate_areaPath()
+        
     def viaPointGenerator(self, vertices, current_pose, end_pose):
         [polygon, region_cm, region_radius] = self.coverage_points(vertices)
         region_cm = list(region_cm)
@@ -360,7 +391,7 @@ class coveragePathPlanning(infrastructureGraph):
         via_points = []
         path_radius = []
 
-    # create location datas for ortools
+        # create location datas for ortools
         data = {}
         data['location'] = [tuple(current_pose)]  # add start pose
         for i in region_cm:
@@ -373,7 +404,7 @@ class coveragePathPlanning(infrastructureGraph):
         
         locations = data['location']
 
-    # create distances matrix for ortools
+        # create distances matrix for ortools
         distances = {}
         for from_counter, from_node in enumerate(locations):
             distances[from_counter] = {}
@@ -395,7 +426,7 @@ class coveragePathPlanning(infrastructureGraph):
                         else:
                             distances[from_counter][to_counter] = 10000000000
         
-    # ortools algorithm part
+        # ortools algorithm part
         manager = pywrapcp.RoutingIndexManager(len(data['location']), data['num_vehicles'], data['depot'])        
         rounting = pywrapcp.RoutingModel(manager)
 
@@ -423,7 +454,7 @@ class coveragePathPlanning(infrastructureGraph):
                 best_state += [manager.IndexToNode(index)]
                 index = solution.Value(rounting.NextVar(index))
 
-    # sorted to fixed start fixed stop sequence and filter dummy node out 
+        # sorted to fixed start fixed stop sequence and filter dummy node out 
         n_state = len(best_state)
 
         ind_start = best_state.index(0)
@@ -446,7 +477,7 @@ class coveragePathPlanning(infrastructureGraph):
             elif ind_start == 0:
                 ind_via_points = best_state[0:n_state-1]
 
-    # map index to via-points
+        # map index to via-points
         for i in ind_via_points:
             if i != 0 and i != len(ind_via_points)-1:
                 via_points.append(region_cm[i-1])
@@ -608,128 +639,183 @@ class coveragePathPlanning(infrastructureGraph):
 
         return sub_poly
 
-    def generate_areaPath(self):
-        k = 1
-        candidate = []       
+    def generate_areaPath(self):   
         max_iter = self.max_iteration_area_search
+        n_robot = len(self.start_area)
 
-        # bi-directional graph search
-        current_graph_front = [self.start_area]
-        current_graph_back = [self.goal_area]
-        connect_graph = []
+        for r in range(n_robot):
+            k = 1
+            candidate = []    
+            self.area_path.append([])
+            self.clean_path.append([])
+            self.mid_edge_path_idx.append([])
 
-        while True:
-            while (k <= max_iter):
-                temp_graph_front = []
-                temp_graph_back = []
-                        
-                if type(current_graph_front[0]) == int: #first time boths are int
-                    neighbor_list_front = [[n] for n in self.area_graph.neighbors(current_graph_front[0])]
-                    temp_graph_front = np.concatenate((matlib.repmat(current_graph_front, len(neighbor_list_front),1), neighbor_list_front), axis = 1)
+            print('start area : ' + str(self.start_area[r]) + ', goal area : ' + str(self.goal_area[r]))
+            print('cleaning areas : ', self.cleanning_area[r])
+            print('generating area paths\n')
 
-                    neighbor_list_back = [[n] for n in self.area_graph.neighbors(current_graph_back[0])]
-                    temp_graph_back = np.concatenate((matlib.repmat(current_graph_back, len(neighbor_list_back),1), neighbor_list_back), axis = 1)
-                else: 
-                    graph_i_front = []
-                    graph_i_back = []
-                    num_front = len(current_graph_front[0])
-                    num_back = len(current_graph_back[0])
+            # bi-directional graph search
+            current_graph_front = [self.start_area[r]]
+            current_graph_back = [self.goal_area[r]]
+            connect_graph = []
+
+            while True:
+                while (k <= max_iter):
+                    temp_graph_front = []
+                    temp_graph_back = []
+                            
+                    if type(current_graph_front[0]) == int: #first time boths are int
+                        neighbor_list_front = [[n] for n in self.area_graph.neighbors(current_graph_front[0])]
+                        temp_graph_front = np.concatenate((matlib.repmat(current_graph_front, len(neighbor_list_front),1), neighbor_list_front), axis = 1)
+
+                        neighbor_list_back = [[n] for n in self.area_graph.neighbors(current_graph_back[0])]
+                        temp_graph_back = np.concatenate((matlib.repmat(current_graph_back, len(neighbor_list_back),1), neighbor_list_back), axis = 1)
+                    else: 
+                        graph_i_front = []
+                        graph_i_back = []
+                        num_front = len(current_graph_front[0])
+                        num_back = len(current_graph_back[0])
+
+                        for i in range(len(current_graph_front)):
+                            neighbor_list_front = [[n] for n in self.area_graph.neighbors(current_graph_front[i][num_front-1])]
+                            graph_i_front = np.concatenate((matlib.repmat(current_graph_front[i], len(neighbor_list_front), 1), neighbor_list_front), axis = 1)
+                            
+                            if i == 0:
+                                temp_graph_front = graph_i_front
+                            else:
+                                temp_graph_front = np.concatenate((temp_graph_front, graph_i_front))
+                            
+                        for i in range(len(current_graph_back)):
+                            neighbor_list_back = [[n] for n in self.area_graph.neighbors(current_graph_back[i][num_back-1])]
+                            graph_i_back = np.concatenate((matlib.repmat(current_graph_back[i], len(neighbor_list_back), 1), neighbor_list_back), axis = 1)
+
+                            if i == 0:
+                                temp_graph_back = graph_i_back
+                            else:
+                                temp_graph_back = np.concatenate((temp_graph_back, graph_i_back))
+
+                    current_graph_front = temp_graph_front
+                    current_graph_back = temp_graph_back
 
                     for i in range(len(current_graph_front)):
-                        neighbor_list_front = [[n] for n in self.area_graph.neighbors(current_graph_front[i][num_front-1])]
-                        graph_i_front = np.concatenate((matlib.repmat(current_graph_front[i], len(neighbor_list_front), 1), neighbor_list_front), axis = 1)
-                        
-                        if i == 0:
-                            temp_graph_front = graph_i_front
-                        else:
-                            temp_graph_front = np.concatenate((temp_graph_front, graph_i_front))
-                        
-                    for i in range(len(current_graph_back)):
-                        neighbor_list_back = [[n] for n in self.area_graph.neighbors(current_graph_back[i][num_back-1])]
-                        graph_i_back = np.concatenate((matlib.repmat(current_graph_back[i], len(neighbor_list_back), 1), neighbor_list_back), axis = 1)
+                        diff_list = np.subtract(current_graph_back, current_graph_front[i])
+                        end_diff_list = np.transpose(diff_list)[len(diff_list[0])-1]
+                        if set(self.cleanning_area[r]).issubset(set(current_graph_front[i])) and current_graph_front[i][-1] == self.goal_area[r]:
+                            candidate.append(current_graph_front[i])
+                            break
+                        if 0 in end_diff_list:
+                            zero_index_list = [x for x in range(len(end_diff_list)) if end_diff_list[x] == 0]
+                            [connect_graph.append(list(current_graph_front[i]) + list(current_graph_back[z][::-1][1:])) for z in zero_index_list]
+                    
+                    candidate += [path_list for path_list in connect_graph if set(self.cleanning_area[r]).issubset(set(path_list))]
+                    
+                    k = k+1
 
-                        if i == 0:
-                            temp_graph_back = graph_i_back
-                        else:
-                            temp_graph_back = np.concatenate((temp_graph_back, graph_i_back))
-
-                current_graph_front = temp_graph_front
-                current_graph_back = temp_graph_back
-
-                for i in range(len(current_graph_front)):
-                    diff_list = np.subtract(current_graph_back, current_graph_front[i])
-                    end_diff_list = np.transpose(diff_list)[len(diff_list[0])-1]
-                    if set(self.cleanning_area).issubset(set(current_graph_front[i])) and current_graph_front[i][-1] == self.goal_area:
-                        candidate.append(current_graph_front[i])
-                        break
-                    if 0 in end_diff_list:
-                        zero_index_list = [x for x in range(len(end_diff_list)) if end_diff_list[x] == 0]
-                        [connect_graph.append(list(current_graph_front[i]) + list(current_graph_back[z][::-1][1:])) for z in zero_index_list]
-                
-                candidate += [path_list for path_list in connect_graph if set(self.cleanning_area).issubset(set(path_list))]
-                
-                k = k+1
-
-            if len(candidate) == 0:
-                max_iter = max_iter+1
-            else:
-                break
-
-        # find minimum path
-        dist_path = []
-        for candi_i in candidate:
-            path_edge = [list(set([e for e in self.area_graph._node[candi_i[x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[candi_i[x+1]]['area_edges']]))) for x in range(len(candi_i)-1)]
-            filter_edge = []
-            for i in path_edge:
-                if len(i) > 1:
-                    for j in i:
-                        if not self.wall_graph[self.wall_edges_dict[j][0]][self.wall_edges_dict[j][1]]['isWall'] :
-                            filter_edge.append(j)
+                if len(candidate) == 0:
+                    max_iter = max_iter+1
                 else:
-                    filter_edge.append(i[0])
+                    break
 
-            node_idx = [[self.mid_edges_graph._node[y]['edge_Number'] for y in self.mid_edges_graph._node].index(x)+1 for x in filter_edge]
-            dist_temp = 0
+            # find minimum path
+            dist_path = []
+            for candi_i in candidate:
+                path_edge = [list(set([e for e in self.area_graph._node[candi_i[x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[candi_i[x+1]]['area_edges']]))) for x in range(len(candi_i)-1)]
+                filter_edge = []
+                for i in path_edge:
+                    if len(i) > 1:
+                        for j in i:
+                            if not self.wall_graph[self.wall_edges_dict[j][0]][self.wall_edges_dict[j][1]]['isWall'] :
+                                filter_edge.append(j)
+                    else:
+                        filter_edge.append(i[0])
 
-            for idx in range(len(node_idx)-1):
-                current_node = node_idx[idx]
-                next_node = node_idx[idx+1]
-                if next_node - current_node != 0:
-                    dist_temp = dist_temp + self.mid_edges_graph[current_node][next_node]['weight']
-            dist_path.append(dist_temp)
+                node_idx = [[self.mid_edges_graph._node[y]['edge_Number'] for y in self.mid_edges_graph._node].index(x)+1 for x in filter_edge]
+                dist_temp = 0
 
-        min_dist = min(dist_path)
-        min_dist_idx = dist_path.index(min_dist)
+                for idx in range(len(node_idx)-1):
+                    current_node = node_idx[idx]
+                    next_node = node_idx[idx+1]
+                    if next_node - current_node != 0:
+                        dist_temp = dist_temp + self.mid_edges_graph[current_node][next_node]['weight']
+                dist_path.append(dist_temp)
 
-        path_n = candidate[min_dist_idx]               
+            min_dist = min(dist_path)
+            min_dist_idx = dist_path.index(min_dist)
 
-        cleanList = self.cleanning_area
-        path_clean = []
-        for i in range(len(path_n)):
-            if path_n[i] in cleanList:
-                path_clean.append(1)
-                cleanList.pop(cleanList.index(path_n[i]))
-            else:
-                path_clean.append(0)
-        
-        mid_edge_path = [list(set([e for e in self.area_graph._node[path_n[x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[path_n[x+1]]['area_edges']]))) for x in range(len(path_n)-1)]
-        
-        filter_mid_edge_path = []
-        for i in mid_edge_path:
+            path_n_temp = list(candidate[min_dist_idx])
+
+            cleanList = self.cleanning_area[r]
+            path_clean_temp = []
+            for i in range(len(path_n_temp)):
+                if path_n_temp[i] in cleanList:
+                    path_clean_temp.append(1)
+                    cleanList.pop(cleanList.index(path_n_temp[i]))
+                else:
+                    path_clean_temp.append(0)
+
+            path_n = []
+            path_clean = []
+
+            end_temp = -1
+            # filter unnecessory path
+            while len(path_n_temp) > 3:
+                node1 = path_n_temp[0]
+                node2 = path_n_temp[1]
+                node3 = path_n_temp[2]
+                clean1 = path_clean_temp[0]
+                clean2 = path_clean_temp[1]
+                clean3 = path_clean_temp[2]
+
+                if node1 == node3 and clean2 == 0:
+                    path_n += [node1]
+                    path_clean += [clean1]
+
+                    end_temp =  node3
+
+                    path_n_temp.pop(0)
+                    path_n_temp.pop(0)
+                    path_n_temp.pop(0)
+                    path_clean_temp.pop(0)
+                    path_clean_temp.pop(0)
+                    path_clean_temp.pop(0)
+
+                elif end_temp == node2 and clean1 == 0:
+                    path_n_temp.pop(0)
+                    path_n_temp.pop(0)
+                    path_clean_temp.pop(0)
+                    path_clean_temp.pop(0)
+
+                else:
+                    path_n += [node1]
+                    path_clean += [clean1]
+
+                    path_n_temp.pop(0)
+                    path_clean_temp.pop(0)
+            
+            path_n += path_n_temp
+            path_clean += path_clean_temp
+            # path_n = path_n_temp
+            # path_clean = path_clean_temp
+            ##
+            mid_edge_path = [list(set([e for e in self.area_graph._node[path_n[x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[path_n[x+1]]['area_edges']]))) for x in range(len(path_n)-1)]
+            
+            filter_mid_edge_path = []
+            for i in mid_edge_path:
                 if len(i) > 1:
                     for j in i:
                         if not self.wall_graph[self.wall_edges_dict[j][0]][self.wall_edges_dict[j][1]]['isWall'] :
                             filter_mid_edge_path.append(j)
                 else:
-                   filter_mid_edge_path.append(i[0])
+                    filter_mid_edge_path.append(i[0])
 
-        self.area_path = path_n
-        self.clean_path = path_clean
-        self.mid_edge_path_idx = [[self.mid_edges_graph._node[y]['edge_Number'] for y in self.mid_edges_graph._node].index(x)+1 for x in filter_mid_edge_path]
+            self.area_path[r] = path_n
+            self.clean_path[r] = path_clean
+            self.mid_edge_path_idx[r] = [[self.mid_edges_graph._node[y]['edge_Number'] for y in self.mid_edges_graph._node].index(x)+1 for x in filter_mid_edge_path]
 
-        print('finish generated area paths\n')
-        print(self.area_path)
-        print(self.clean_path)
+            print('finish generated area paths for robot : ' + str(r))
+            print(self.area_path[r])
+            print(self.clean_path[r])
+            print('\n')
 
         return None
 
@@ -754,10 +840,10 @@ class coveragePathPlanning(infrastructureGraph):
 ##############################################################################################################################
 
     def writeText(self):
-        file = open("pose.txt","w+")
-
-        for i in range(len(self.robot_path)):
-            file.write(str(self.robot_duration[i])+','+str(self.robot_path[i][0])+','+str(self.robot_path[i][1])+','+str(self.robot_yaw[i])+','+str(self.robot_qw[i])+'\n')
+        for r in range(len(self.robot_path)):
+            file = open("robot "+str(r+1) + ".txt","w+")
+            for i in range(len(self.robot_path[r])):
+                file.write(str(self.robot_duration[r][i])+','+str(self.robot_path[r][i][0])+','+str(self.robot_path[r][i][1])+','+str(self.robot_yaw[r][i])+','+str(self.robot_qw[r][i])+'\n')
 
 ##############################################################################################################################
 #####                                                                                                                    #####
@@ -818,36 +904,45 @@ class coveragePathPlanning(infrastructureGraph):
                     y = self.wall_graph._node[j]['Coordinates'][1]
                     # plt.plot(x, y, 'b*')
 
-            anim = animation.FuncAnimation(self.fig, self.animate, init_func = self.init_animate, frames = len(self.robot_path), interval = self.animate_times, blit = False)
+            anim = animation.FuncAnimation(self.fig, self.animate, init_func = self.init_animate, frames = max([len(i) for i in self.robot_path]), interval = self.animate_times, blit = False)
             plt.axis('equal')
             plt.show()
     
     def init_animate(self):
-        self.line1.set_data([],[])
-        self.line2.set_data([],[])
+        for r in range(len(self.robot_path)):
+            self.line1.set_data([],[])
+            self.line2.set_data([],[])
         
         return self.line1, self.line2
 
     def animate(self, i):
         l = 0.5
-        p_i = self.robot_path[i]
-        cir = plt.Circle((p_i[0], p_i[1]), self.robot_clean_radius[i], color = 'yellow')
-        plt.plot(p_i[0], p_i[1], '*k')
-        self.ax.add_artist(cir)
+        for r in range(len(self.robot_path)):
+            if r == 0:
+                cl = 'k'
+            elif r == 1:
+                cl = 'b'
+            elif r == 2:
+                cl = 'r'
+    
+            if i <= len(self.robot_path[r])-1:
+                p_i = self.robot_path[r][i]
+                cir = plt.Circle((p_i[0], p_i[1]), self.robot_clean_radius[r][i], color = 'yellow')
+                plt.plot(p_i[0], p_i[1], '*' + cl)
+                self.ax.add_artist(cir)
 
-        self.line2.set_data([p_i[0], p_i[0]+l*np.cos(self.robot_yaw[i])],[p_i[1], p_i[1]+l*np.sin(self.robot_yaw[i])])
-        
-        if i != len(self.robot_path)-1:
-            p_i_p = self.robot_path[i+1]
-            self.line1.set_data([p_i[0], p_i_p[0]], [p_i[1], p_i_p[1]])
-            self.line2.set_data([p_i_p[0], p_i_p[0] + l*np.cos(self.robot_yaw[i+1])],[p_i_p[1], p_i_p[1] + l*np.sin(self.robot_yaw[i+1])])
-            
+                # plt.plot([p_i[0], p_i[0]+l*np.cos(self.robot_yaw[r][i])],[p_i[1], p_i[1]+l*np.sin(self.robot_yaw[r][i])], cl, lw = 2)
+                
+                if i != len(self.robot_path[r])-1:
+                    p_i_p = self.robot_path[r][i+1]
+                    plt.plot([p_i[0], p_i_p[0]], [p_i[1], p_i_p[1]], '--' + cl , lw = 2)
+                    # plt.plot([p_i_p[0], p_i_p[0] + l*np.cos(self.robot_yaw[r][i+1])],[p_i_p[1], p_i_p[1] + l*np.sin(self.robot_yaw[r][i+1])], cl, lw = 2)
+    
+                if i != 0:
+                    p_i_m = self.robot_path[r][i-1]
+                    # plt.plot([[p_i_m][0], p_i[0]], [p_i_m[1], p_i[1]], '--k')
 
-        if i != 0:
-            p_i_m = self.robot_path[i-1]
-            # plt.plot([[p_i_m][0], p_i[0]], [p_i_m[1], p_i[1]], '--k')
-
-        return self.line1, self.line2
+        return None
                 
 ##############################################################################################################################
 #####                                                                                                                    #####
@@ -988,8 +1083,7 @@ if __name__ == "__main__":
     CPP = coveragePathPlanning(p, con_e, isWall, area_edges, con_a, True)
     CPP.initialize_graphs()
     # CPP.visual_area()
-    CPP.generate_robotWorkFlowPath([0, 0], [-13, 0], [1, 4, 2, 5, 10, 13])
-    
-    # CPP.generate_robotWorkFlowPath([0, 2.6], [6,12], [1, 2, 3, 4, 14, 15, 12, 7, 6, 10])
+
+    CPP.generate_robotWorkFlowPath([[-10,0], [-10,-10]], [[0, -8], [0,0]], [1, 4, 2, 5, 10, 13, 3, 8, 9, 11, 14])
     
     print("")
