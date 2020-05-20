@@ -194,7 +194,7 @@ class infrastructureGraph:
 
 class coveragePathPlanning(infrastructureGraph):
     max_cleanning_radius = 1.5
-    max_iteration_area_search = 4
+    max_iteration_area_search = 5
     energy_to_kill = 67
     coef = [[0.1431328927561467724],
           [-11.0300107335172262],
@@ -369,7 +369,6 @@ class coveragePathPlanning(infrastructureGraph):
             self.cleanning_area.append([cleaning_area[area_cleaning.index(area_cleaning_sorted[0])]])
             area_cleaning_sorted.pop(0)
 
-            
         for j in area_cleaning_sorted:
             sum_avg_list = []
             error_avg_list = []
@@ -381,8 +380,563 @@ class coveragePathPlanning(infrastructureGraph):
             min_error = min(error_avg_list)
             self.cleanning_area[error_avg_list.index(min_error)].append(cleaning_area[area_cleaning.index(j)])
 
-        self.generate_areaPath()
+        self.generate_areaPath_v2()
+       
+    def generate_areaPath(self):   
+        max_iter = self.max_iteration_area_search
+        n_robot = len(self.start_area)
+
+        for r in range(n_robot):
+            k = 1
+            candidate = []    
+            self.area_path.append([])
+            self.clean_path.append([])
+            self.mid_edge_path_idx.append([])
+
+            print('start area : ' + str(self.start_area[r]) + ', goal area : ' + str(self.goal_area[r]))
+            print('cleaning areas : ', self.cleanning_area[r])
+            print('generating area paths\n')
+
+            # bi-directional graph search
+            current_graph_front = [self.start_area[r]]
+            current_graph_back = [self.goal_area[r]]
+            connect_graph = []
+
+            while True:
+                while (k <= max_iter):
+                    temp_graph_front = []
+                    temp_graph_back = []
+                            
+                    if type(current_graph_front[0]) == int: #first time boths are int
+                        neighbor_list_front = [[n] for n in self.area_graph.neighbors(current_graph_front[0])]
+                        temp_graph_front = np.concatenate((matlib.repmat(current_graph_front, len(neighbor_list_front),1), neighbor_list_front), axis = 1)
+
+                        neighbor_list_back = [[n] for n in self.area_graph.neighbors(current_graph_back[0])]
+                        temp_graph_back = np.concatenate((matlib.repmat(current_graph_back, len(neighbor_list_back),1), neighbor_list_back), axis = 1)
+                    else: 
+                        graph_i_front = []
+                        graph_i_back = []
+                        num_front = len(current_graph_front[0])
+                        num_back = len(current_graph_back[0])
+
+                        for i in range(len(current_graph_front)):
+                            neighbor_list_front = [[n] for n in self.area_graph.neighbors(current_graph_front[i][num_front-1])]
+                            graph_i_front = np.concatenate((matlib.repmat(current_graph_front[i], len(neighbor_list_front), 1), neighbor_list_front), axis = 1)
+                            
+                            if i == 0:
+                                temp_graph_front = graph_i_front
+                            else:
+                                temp_graph_front = np.concatenate((temp_graph_front, graph_i_front))
+                            
+                        for i in range(len(current_graph_back)):
+                            neighbor_list_back = [[n] for n in self.area_graph.neighbors(current_graph_back[i][num_back-1])]
+                            graph_i_back = np.concatenate((matlib.repmat(current_graph_back[i], len(neighbor_list_back), 1), neighbor_list_back), axis = 1)
+
+                            if i == 0:
+                                temp_graph_back = graph_i_back
+                            else:
+                                temp_graph_back = np.concatenate((temp_graph_back, graph_i_back))
+
+                    current_graph_front = temp_graph_front
+                    current_graph_back = temp_graph_back
+
+                    for i in range(len(current_graph_front)):
+                        diff_list = np.subtract(current_graph_back, current_graph_front[i])
+                        end_diff_list = np.transpose(diff_list)[len(diff_list[0])-1]
+                        if set(self.cleanning_area[r]).issubset(set(current_graph_front[i])) and current_graph_front[i][-1] == self.goal_area[r]:
+                            candidate.append(current_graph_front[i])
+                            break
+                        if 0 in end_diff_list:
+                            zero_index_list = [x for x in range(len(end_diff_list)) if end_diff_list[x] == 0]
+                            [connect_graph.append(list(current_graph_front[i]) + list(current_graph_back[z][::-1][1:])) for z in zero_index_list]
+                    
+                    candidate += [path_list for path_list in connect_graph if set(self.cleanning_area[r]).issubset(set(path_list))]
+                    
+                    k = k+1
+
+                if len(candidate) == 0:
+                    max_iter = max_iter+1
+                else:
+                    break
+
+            # find minimum path
+            dist_path = []
+            for candi_i in candidate:
+                path_edge = [list(set([e for e in self.area_graph._node[candi_i[x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[candi_i[x+1]]['area_edges']]))) for x in range(len(candi_i)-1)]
+                filter_edge = []
+                for i in path_edge:
+                    if len(i) > 1:
+                        for j in i:
+                            if not self.wall_graph[self.wall_edges_dict[j][0]][self.wall_edges_dict[j][1]]['isWall'] :
+                                filter_edge.append(j)
+                    else:
+                        filter_edge.append(i[0])
+
+                node_idx = [[self.mid_edges_graph._node[y]['edge_Number'] for y in self.mid_edges_graph._node].index(x)+1 for x in filter_edge]
+                dist_temp = 0
+
+                for idx in range(len(node_idx)-1):
+                    current_node = node_idx[idx]
+                    next_node = node_idx[idx+1]
+                    if next_node - current_node != 0:
+                        dist_temp = dist_temp + self.mid_edges_graph[current_node][next_node]['weight']
+                dist_path.append(dist_temp)
+
+            min_dist = min(dist_path)
+            min_dist_idx = dist_path.index(min_dist)
+
+            path_n_temp = list(candidate[min_dist_idx])
+
+            cleanList = self.cleanning_area[r]
+            path_clean_temp = []
+            for i in range(len(path_n_temp)):
+                if path_n_temp[i] in cleanList:
+                    path_clean_temp.append(1)
+                    cleanList.pop(cleanList.index(path_n_temp[i]))
+                else:
+                    path_clean_temp.append(0)
+
+            path_n = []
+            path_clean = []
+
+            end_temp = -1
+            # filter unnecessory path
+            while len(path_n_temp) > 3:
+                node1 = path_n_temp[0]
+                node2 = path_n_temp[1]
+                node3 = path_n_temp[2]
+                clean1 = path_clean_temp[0]
+                clean2 = path_clean_temp[1]
+                clean3 = path_clean_temp[2]
+
+                if node1 == node3 and clean2 == 0:
+                    path_n += [node1]
+                    path_clean += [clean1]
+
+                    end_temp =  node3
+
+                    path_n_temp.pop(0)
+                    path_n_temp.pop(0)
+                    path_n_temp.pop(0)
+                    path_clean_temp.pop(0)
+                    path_clean_temp.pop(0)
+                    path_clean_temp.pop(0)
+
+                elif end_temp == node2 and clean1 == 0:
+                    path_n_temp.pop(0)
+                    path_n_temp.pop(0)
+                    path_clean_temp.pop(0)
+                    path_clean_temp.pop(0)
+
+                else:
+                    path_n += [node1]
+                    path_clean += [clean1]
+
+                    path_n_temp.pop(0)
+                    path_clean_temp.pop(0)
+            
+            path_n += path_n_temp
+            path_clean += path_clean_temp
         
+            mid_edge_path = [list(set([e for e in self.area_graph._node[path_n[x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[path_n[x+1]]['area_edges']]))) for x in range(len(path_n)-1)]
+            
+            filter_mid_edge_path = []
+            for i in mid_edge_path:
+                if len(i) > 1:
+                    for j in i:
+                        if not self.wall_graph[self.wall_edges_dict[j][0]][self.wall_edges_dict[j][1]]['isWall'] :
+                            filter_mid_edge_path.append(j)
+                else:
+                    filter_mid_edge_path.append(i[0])
+
+            self.area_path[r] = path_n
+            self.clean_path[r] = path_clean
+            self.mid_edge_path_idx[r] = [[self.mid_edges_graph._node[y]['edge_Number'] for y in self.mid_edges_graph._node].index(x)+1 for x in filter_mid_edge_path]
+
+            print('finish generated area paths for robot : ' + str(r))
+            print(self.area_path[r])
+            print(self.clean_path[r])
+            print('\n')
+
+        return None
+        
+    def generate_areaPath_v2(self):   
+        n_robot = len(self.start_area)
+
+        for r in range(n_robot):
+            k = 1
+            candidate = []    
+            self.area_path.append([])
+            self.clean_path.append([])
+            self.mid_edge_path_idx.append([])
+            
+            print('start area : ' + str(self.start_area[r]) + ', goal area : ' + str(self.goal_area[r]))
+            print('cleaning areas : ', self.cleanning_area[r])
+            print('generating area paths\n')
+
+            # sort cleaning area step sorted by (minimum direction from from_area to to_area)       **if goal area is in cleaning area so fix that cleaning area as end cleaning area
+            flag_start = False
+            flag_goal = False
+            
+            cleaning_step = []
+            
+            self.area_path[r] += [self.start_area[r]]
+            
+            if self.start_area[r] in self.cleanning_area[r]:
+                cleaning_step += [self.start_area[r]]
+                self.cleanning_area[r].pop(self.cleanning_area[r].index(self.start_area[r]))
+                flag_start = True
+            if self.goal_area[r] in self.cleanning_area[r]:
+                cleaning_step += [self.goal_area[r]]
+                self.cleanning_area[r].pop(self.cleanning_area[r].index(self.goal_area[r]))
+                flag_goal = True
+            
+            while len(self.cleanning_area[r]) != 0:
+                path_list = []
+                dist_list = []
+                for i in self.cleanning_area[r]:
+                    to_area = i
+                    
+                    if flag_start and not flag_goal:
+                        from_area = cleaning_step[len(cleaning_step)-1]
+                    elif not flag_start and flag_goal:
+                        if len(cleaning_step) == 0:
+                            from_area = self.start_area[r]
+                        else:
+                            from_area = cleaning_step[len(cleaning_step)-2]
+                    else:
+                        from_area = cleaning_step[len(cleaning_step)-2]
+                        
+                    path,dist = self.find_shortest_path(from_area, to_area)
+                    
+                    path_list.append(path)
+                    dist_list.append(dist)
+                    
+                min_dist = min(dist_list)
+                min_idx = dist_list.index(min_dist)
+                
+                min_path = path_list[min_idx]
+                
+                if flag_start and not flag_goal:
+                    cleaning_step.append(self.cleanning_area[r][min_idx])
+                elif not flag_start and flag_goal:
+                    cleaning_step.insert(len(cleaning_step)-1, self.cleanning_area[r][min_idx])
+                else:
+                    cleaning_step.insert(len(cleaning_step)-1, self.cleanning_area[r][min_idx])
+
+                self.area_path[r] += min_path[1:]
+                self.cleanning_area[r].pop(min_idx)
+                
+        
+            print(cleaning_step)
+               
+                    
+                        
+                        
+                    
+                    
+                    
+                
+        
+            
+           #################################################################################################################################################### 
+            
+            # bi-directional graph search
+            current_graph_front = [self.start_area[r]]
+            current_graph_back = [self.goal_area[r]]
+            connect_graph = []
+
+            while True:
+                while (k <= max_iter):
+                    temp_graph_front = []
+                    temp_graph_back = []
+                            
+                    if type(current_graph_front[0]) == int: #first time boths are int
+                        neighbor_list_front = [[n] for n in self.area_graph.neighbors(current_graph_front[0])]
+                        temp_graph_front = np.concatenate((matlib.repmat(current_graph_front, len(neighbor_list_front),1), neighbor_list_front), axis = 1)
+
+                        neighbor_list_back = [[n] for n in self.area_graph.neighbors(current_graph_back[0])]
+                        temp_graph_back = np.concatenate((matlib.repmat(current_graph_back, len(neighbor_list_back),1), neighbor_list_back), axis = 1)
+                    else: 
+                        graph_i_front = []
+                        graph_i_back = []
+                        num_front = len(current_graph_front[0])
+                        num_back = len(current_graph_back[0])
+
+                        for i in range(len(current_graph_front)):
+                            neighbor_list_front = [[n] for n in self.area_graph.neighbors(current_graph_front[i][num_front-1])]
+                            graph_i_front = np.concatenate((matlib.repmat(current_graph_front[i], len(neighbor_list_front), 1), neighbor_list_front), axis = 1)
+                            
+                            if i == 0:
+                                temp_graph_front = graph_i_front
+                            else:
+                                temp_graph_front = np.concatenate((temp_graph_front, graph_i_front))
+                            
+                        for i in range(len(current_graph_back)):
+                            neighbor_list_back = [[n] for n in self.area_graph.neighbors(current_graph_back[i][num_back-1])]
+                            graph_i_back = np.concatenate((matlib.repmat(current_graph_back[i], len(neighbor_list_back), 1), neighbor_list_back), axis = 1)
+
+                            if i == 0:
+                                temp_graph_back = graph_i_back
+                            else:
+                                temp_graph_back = np.concatenate((temp_graph_back, graph_i_back))
+
+                    current_graph_front = temp_graph_front
+                    current_graph_back = temp_graph_back
+
+                    for i in range(len(current_graph_front)):
+                        diff_list = np.subtract(current_graph_back, current_graph_front[i])
+                        end_diff_list = np.transpose(diff_list)[len(diff_list[0])-1]
+                        if set(self.cleanning_area[r]).issubset(set(current_graph_front[i])) and current_graph_front[i][-1] == self.goal_area[r]:
+                            candidate.append(current_graph_front[i])
+                            break
+                        if 0 in end_diff_list:
+                            zero_index_list = [x for x in range(len(end_diff_list)) if end_diff_list[x] == 0]
+                            [connect_graph.append(list(current_graph_front[i]) + list(current_graph_back[z][::-1][1:])) for z in zero_index_list]
+                    
+                    candidate += [path_list for path_list in connect_graph if set(self.cleanning_area[r]).issubset(set(path_list))]
+                    
+                    k = k+1
+
+                if len(candidate) == 0:
+                    max_iter = max_iter+1
+                else:
+                    break
+
+            # find minimum path
+            dist_path = []
+            for candi_i in candidate:
+                path_edge = [list(set([e for e in self.area_graph._node[candi_i[x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[candi_i[x+1]]['area_edges']]))) for x in range(len(candi_i)-1)]
+                filter_edge = []
+                for i in path_edge:
+                    if len(i) > 1:
+                        for j in i:
+                            if not self.wall_graph[self.wall_edges_dict[j][0]][self.wall_edges_dict[j][1]]['isWall'] :
+                                filter_edge.append(j)
+                    else:
+                        filter_edge.append(i[0])
+
+                node_idx = [[self.mid_edges_graph._node[y]['edge_Number'] for y in self.mid_edges_graph._node].index(x)+1 for x in filter_edge]
+                dist_temp = 0
+
+                for idx in range(len(node_idx)-1):
+                    current_node = node_idx[idx]
+                    next_node = node_idx[idx+1]
+                    if next_node - current_node != 0:
+                        dist_temp = dist_temp + self.mid_edges_graph[current_node][next_node]['weight']
+                dist_path.append(dist_temp)
+
+            min_dist = min(dist_path)
+            min_dist_idx = dist_path.index(min_dist)
+
+            path_n_temp = list(candidate[min_dist_idx])
+
+            cleanList = self.cleanning_area[r]
+            path_clean_temp = []
+            for i in range(len(path_n_temp)):
+                if path_n_temp[i] in cleanList:
+                    path_clean_temp.append(1)
+                    cleanList.pop(cleanList.index(path_n_temp[i]))
+                else:
+                    path_clean_temp.append(0)
+
+            path_n = []
+            path_clean = []
+
+            end_temp = -1
+            
+            # filter unnecessory path
+            while len(path_n_temp) > 3:
+                node1 = path_n_temp[0]
+                node2 = path_n_temp[1]
+                node3 = path_n_temp[2]
+                clean1 = path_clean_temp[0]
+                clean2 = path_clean_temp[1]
+                clean3 = path_clean_temp[2]
+
+                if node1 == node3 and clean2 == 0:
+                    path_n += [node1]
+                    path_clean += [clean1]
+
+                    end_temp =  node3
+
+                    path_n_temp.pop(0)
+                    path_n_temp.pop(0)
+                    path_n_temp.pop(0)
+                    path_clean_temp.pop(0)
+                    path_clean_temp.pop(0)
+                    path_clean_temp.pop(0)
+
+                elif end_temp == node2 and clean1 == 0:
+                    path_n_temp.pop(0)
+                    path_n_temp.pop(0)
+                    path_clean_temp.pop(0)
+                    path_clean_temp.pop(0)
+
+                else:
+                    path_n += [node1]
+                    path_clean += [clean1]
+
+                    path_n_temp.pop(0)
+                    path_clean_temp.pop(0)
+            
+            path_n += path_n_temp
+            path_clean += path_clean_temp
+        
+            mid_edge_path = [list(set([e for e in self.area_graph._node[path_n[x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[path_n[x+1]]['area_edges']]))) for x in range(len(path_n)-1)]
+            
+            filter_mid_edge_path = []
+            for i in mid_edge_path:
+                if len(i) > 1:
+                    for j in i:
+                        if not self.wall_graph[self.wall_edges_dict[j][0]][self.wall_edges_dict[j][1]]['isWall'] :
+                            filter_mid_edge_path.append(j)
+                else:
+                    filter_mid_edge_path.append(i[0])
+
+            self.area_path[r] = path_n
+            self.clean_path[r] = path_clean
+            self.mid_edge_path_idx[r] = [[self.mid_edges_graph._node[y]['edge_Number'] for y in self.mid_edges_graph._node].index(x)+1 for x in filter_mid_edge_path]
+
+            print('finish generated area paths for robot : ' + str(r))
+            print(self.area_path[r])
+            print(self.clean_path[r])
+            print('\n')
+
+        return None
+    
+    def find_shortest_path(self, from_area, to_area):
+        k = 1
+        max_iter = self.max_iteration_area_search
+        candidate = []
+        current_graph_front = [from_area]
+        current_graph_back = [to_area]
+        connect_graph = []
+
+        while True:
+            while (k <= max_iter):
+                temp_graph_front = []
+                temp_graph_back = []
+                        
+                if type(current_graph_front[0]) == int: #first time boths are int
+                    neighbor_list_front = [[n] for n in self.area_graph.neighbors(current_graph_front[0])]
+                    temp_graph_front = np.concatenate((matlib.repmat(current_graph_front, len(neighbor_list_front),1), neighbor_list_front), axis = 1)
+
+                    neighbor_list_back = [[n] for n in self.area_graph.neighbors(current_graph_back[0])]
+                    temp_graph_back = np.concatenate((matlib.repmat(current_graph_back, len(neighbor_list_back),1), neighbor_list_back), axis = 1)
+                else: 
+                    graph_i_front = []
+                    graph_i_back = []
+                    num_front = len(current_graph_front[0])
+                    num_back = len(current_graph_back[0])
+
+                    for i in range(len(current_graph_front)):
+                        neighbor_list_front = [[n] for n in self.area_graph.neighbors(current_graph_front[i][num_front-1])]
+                        graph_i_front = np.concatenate((matlib.repmat(current_graph_front[i], len(neighbor_list_front), 1), neighbor_list_front), axis = 1)
+                        
+                        if i == 0:
+                            temp_graph_front = graph_i_front
+                        else:
+                            temp_graph_front = np.concatenate((temp_graph_front, graph_i_front))
+                        
+                    for i in range(len(current_graph_back)):
+                        neighbor_list_back = [[n] for n in self.area_graph.neighbors(current_graph_back[i][num_back-1])]
+                        graph_i_back = np.concatenate((matlib.repmat(current_graph_back[i], len(neighbor_list_back), 1), neighbor_list_back), axis = 1)
+
+                        if i == 0:
+                            temp_graph_back = graph_i_back
+                        else:
+                            temp_graph_back = np.concatenate((temp_graph_back, graph_i_back))
+
+                current_graph_front = temp_graph_front
+                current_graph_back = temp_graph_back
+
+                for i in range(len(current_graph_front)):
+                    diff_list = np.subtract(current_graph_back, current_graph_front[i])
+                    end_diff_list = np.transpose(diff_list)[len(diff_list[0])-1]
+                    if current_graph_front[i][-1] == to_area:
+                        candidate.append(current_graph_front[i])
+                    if 0 in end_diff_list:
+                        zero_index_list = [x for x in range(len(end_diff_list)) if end_diff_list[x] == 0]
+                        [connect_graph.append(list(current_graph_front[i]) + list(current_graph_back[z][::-1][1:])) for z in zero_index_list]
+                
+                candidate += [path_list for path_list in connect_graph]
+                
+                k = k+1
+
+            if len(candidate) == 0:
+                max_iter = max_iter+1
+            else:
+                break
+        
+        all_dist = []
+        for i in range(1, len(self.mid_edges_graph._node)+1):
+            for j in self.mid_edges_graph[i]._atlas:
+                all_dist.append(self.mid_edges_graph[i][j]['weight'])
+                
+        max_dist = max(all_dist)
+        
+        # find minimum path
+        dist_path = []
+        len_list = [len(x) for x in candidate]
+        min_len = min(len_list)
+        candi_i = candidate[len_list.index(min_len)]
+        
+        path_edge = [list(set([e for e in self.area_graph._node[candi_i[x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[candi_i[x+1]]['area_edges']]))) for x in range(len(candi_i)-1)]
+        filter_edge = []
+        for i in path_edge:
+            if len(i) > 1:
+                for j in i:
+                    if not self.wall_graph[self.wall_edges_dict[j][0]][self.wall_edges_dict[j][1]]['isWall'] :
+                        filter_edge.append(j)
+            else:
+                filter_edge.append(i[0])
+
+        node_idx = [[self.mid_edges_graph._node[y]['edge_Number'] for y in self.mid_edges_graph._node].index(x)+1 for x in filter_edge]
+        dist_path= 0
+
+        for idx in range(len(node_idx)-1):
+            current_node = node_idx[idx]
+            next_node = node_idx[idx+1]
+            if next_node - current_node != 0:
+                dist_path += self.mid_edges_graph[current_node][next_node]['weight']
+                
+        min_dist = dist_path
+        min_path = list(candi_i)
+        
+        # dist_path = []
+        # for candi_i in candidate:
+        #     path_edge = [list(set([e for e in self.area_graph._node[candi_i[x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[candi_i[x+1]]['area_edges']]))) for x in range(len(candi_i)-1)]
+        #     filter_edge = []
+        #     for i in path_edge:
+        #         if len(i) > 1:
+        #             for j in i:
+        #                 if not self.wall_graph[self.wall_edges_dict[j][0]][self.wall_edges_dict[j][1]]['isWall'] :
+        #                     filter_edge.append(j)
+        #         else:
+        #             filter_edge.append(i[0])
+
+        #     node_idx = [[self.mid_edges_graph._node[y]['edge_Number'] for y in self.mid_edges_graph._node].index(x)+1 for x in filter_edge]
+        #     dist_temp = 0
+
+        #     for idx in range(len(node_idx)-1):
+        #         current_node = node_idx[idx]
+        #         next_node = node_idx[idx+1]
+        #         if next_node - current_node != 0:
+        #             dist_temp = dist_temp + self.mid_edges_graph[current_node][next_node]['weight']
+        #         else:
+        #             dist_temp += max_dist
+        #     dist_path.append(dist_temp)
+
+        # min_dist = min(dist_path)
+        # min_dist_idx = dist_path.index(min_dist)
+
+        # min_path = list(candidate[min_dist_idx])
+        
+        
+        
+        return min_path, min_dist
+    
     def viaPointGenerator(self, vertices, current_pose, end_pose):
         [polygon, region_cm, region_radius] = self.coverage_points(vertices)
         region_cm = list(region_cm)
@@ -639,186 +1193,6 @@ class coveragePathPlanning(infrastructureGraph):
 
         return sub_poly
 
-    def generate_areaPath(self):   
-        max_iter = self.max_iteration_area_search
-        n_robot = len(self.start_area)
-
-        for r in range(n_robot):
-            k = 1
-            candidate = []    
-            self.area_path.append([])
-            self.clean_path.append([])
-            self.mid_edge_path_idx.append([])
-
-            print('start area : ' + str(self.start_area[r]) + ', goal area : ' + str(self.goal_area[r]))
-            print('cleaning areas : ', self.cleanning_area[r])
-            print('generating area paths\n')
-
-            # bi-directional graph search
-            current_graph_front = [self.start_area[r]]
-            current_graph_back = [self.goal_area[r]]
-            connect_graph = []
-
-            while True:
-                while (k <= max_iter):
-                    temp_graph_front = []
-                    temp_graph_back = []
-                            
-                    if type(current_graph_front[0]) == int: #first time boths are int
-                        neighbor_list_front = [[n] for n in self.area_graph.neighbors(current_graph_front[0])]
-                        temp_graph_front = np.concatenate((matlib.repmat(current_graph_front, len(neighbor_list_front),1), neighbor_list_front), axis = 1)
-
-                        neighbor_list_back = [[n] for n in self.area_graph.neighbors(current_graph_back[0])]
-                        temp_graph_back = np.concatenate((matlib.repmat(current_graph_back, len(neighbor_list_back),1), neighbor_list_back), axis = 1)
-                    else: 
-                        graph_i_front = []
-                        graph_i_back = []
-                        num_front = len(current_graph_front[0])
-                        num_back = len(current_graph_back[0])
-
-                        for i in range(len(current_graph_front)):
-                            neighbor_list_front = [[n] for n in self.area_graph.neighbors(current_graph_front[i][num_front-1])]
-                            graph_i_front = np.concatenate((matlib.repmat(current_graph_front[i], len(neighbor_list_front), 1), neighbor_list_front), axis = 1)
-                            
-                            if i == 0:
-                                temp_graph_front = graph_i_front
-                            else:
-                                temp_graph_front = np.concatenate((temp_graph_front, graph_i_front))
-                            
-                        for i in range(len(current_graph_back)):
-                            neighbor_list_back = [[n] for n in self.area_graph.neighbors(current_graph_back[i][num_back-1])]
-                            graph_i_back = np.concatenate((matlib.repmat(current_graph_back[i], len(neighbor_list_back), 1), neighbor_list_back), axis = 1)
-
-                            if i == 0:
-                                temp_graph_back = graph_i_back
-                            else:
-                                temp_graph_back = np.concatenate((temp_graph_back, graph_i_back))
-
-                    current_graph_front = temp_graph_front
-                    current_graph_back = temp_graph_back
-
-                    for i in range(len(current_graph_front)):
-                        diff_list = np.subtract(current_graph_back, current_graph_front[i])
-                        end_diff_list = np.transpose(diff_list)[len(diff_list[0])-1]
-                        if set(self.cleanning_area[r]).issubset(set(current_graph_front[i])) and current_graph_front[i][-1] == self.goal_area[r]:
-                            candidate.append(current_graph_front[i])
-                            break
-                        if 0 in end_diff_list:
-                            zero_index_list = [x for x in range(len(end_diff_list)) if end_diff_list[x] == 0]
-                            [connect_graph.append(list(current_graph_front[i]) + list(current_graph_back[z][::-1][1:])) for z in zero_index_list]
-                    
-                    candidate += [path_list for path_list in connect_graph if set(self.cleanning_area[r]).issubset(set(path_list))]
-                    
-                    k = k+1
-
-                if len(candidate) == 0:
-                    max_iter = max_iter+1
-                else:
-                    break
-
-            # find minimum path
-            dist_path = []
-            for candi_i in candidate:
-                path_edge = [list(set([e for e in self.area_graph._node[candi_i[x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[candi_i[x+1]]['area_edges']]))) for x in range(len(candi_i)-1)]
-                filter_edge = []
-                for i in path_edge:
-                    if len(i) > 1:
-                        for j in i:
-                            if not self.wall_graph[self.wall_edges_dict[j][0]][self.wall_edges_dict[j][1]]['isWall'] :
-                                filter_edge.append(j)
-                    else:
-                        filter_edge.append(i[0])
-
-                node_idx = [[self.mid_edges_graph._node[y]['edge_Number'] for y in self.mid_edges_graph._node].index(x)+1 for x in filter_edge]
-                dist_temp = 0
-
-                for idx in range(len(node_idx)-1):
-                    current_node = node_idx[idx]
-                    next_node = node_idx[idx+1]
-                    if next_node - current_node != 0:
-                        dist_temp = dist_temp + self.mid_edges_graph[current_node][next_node]['weight']
-                dist_path.append(dist_temp)
-
-            min_dist = min(dist_path)
-            min_dist_idx = dist_path.index(min_dist)
-
-            path_n_temp = list(candidate[min_dist_idx])
-
-            cleanList = self.cleanning_area[r]
-            path_clean_temp = []
-            for i in range(len(path_n_temp)):
-                if path_n_temp[i] in cleanList:
-                    path_clean_temp.append(1)
-                    cleanList.pop(cleanList.index(path_n_temp[i]))
-                else:
-                    path_clean_temp.append(0)
-
-            path_n = []
-            path_clean = []
-
-            end_temp = -1
-            # filter unnecessory path
-            while len(path_n_temp) > 3:
-                node1 = path_n_temp[0]
-                node2 = path_n_temp[1]
-                node3 = path_n_temp[2]
-                clean1 = path_clean_temp[0]
-                clean2 = path_clean_temp[1]
-                clean3 = path_clean_temp[2]
-
-                if node1 == node3 and clean2 == 0:
-                    path_n += [node1]
-                    path_clean += [clean1]
-
-                    end_temp =  node3
-
-                    path_n_temp.pop(0)
-                    path_n_temp.pop(0)
-                    path_n_temp.pop(0)
-                    path_clean_temp.pop(0)
-                    path_clean_temp.pop(0)
-                    path_clean_temp.pop(0)
-
-                elif end_temp == node2 and clean1 == 0:
-                    path_n_temp.pop(0)
-                    path_n_temp.pop(0)
-                    path_clean_temp.pop(0)
-                    path_clean_temp.pop(0)
-
-                else:
-                    path_n += [node1]
-                    path_clean += [clean1]
-
-                    path_n_temp.pop(0)
-                    path_clean_temp.pop(0)
-            
-            path_n += path_n_temp
-            path_clean += path_clean_temp
-            # path_n = path_n_temp
-            # path_clean = path_clean_temp
-            ##
-            mid_edge_path = [list(set([e for e in self.area_graph._node[path_n[x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[path_n[x+1]]['area_edges']]))) for x in range(len(path_n)-1)]
-            
-            filter_mid_edge_path = []
-            for i in mid_edge_path:
-                if len(i) > 1:
-                    for j in i:
-                        if not self.wall_graph[self.wall_edges_dict[j][0]][self.wall_edges_dict[j][1]]['isWall'] :
-                            filter_mid_edge_path.append(j)
-                else:
-                    filter_mid_edge_path.append(i[0])
-
-            self.area_path[r] = path_n
-            self.clean_path[r] = path_clean
-            self.mid_edge_path_idx[r] = [[self.mid_edges_graph._node[y]['edge_Number'] for y in self.mid_edges_graph._node].index(x)+1 for x in filter_mid_edge_path]
-
-            print('finish generated area paths for robot : ' + str(r))
-            print(self.area_path[r])
-            print(self.clean_path[r])
-            print('\n')
-
-        return None
-
     def calculate_time_kill(self, r):
         order = len(self.coef) - 1
         order_list = [ i for i in range(order,-1,-1)]
@@ -842,8 +1216,15 @@ class coveragePathPlanning(infrastructureGraph):
     def writeText(self):
         for r in range(len(self.robot_path)):
             file = open("robot "+str(r+1) + ".txt","w+")
-            for i in range(len(self.robot_path[r])):
-                file.write(str(self.robot_duration[r][i])+','+str(self.robot_path[r][i][0])+','+str(self.robot_path[r][i][1])+','+str(self.robot_yaw[r][i])+','+str(self.robot_qw[r][i])+'\n')
+            for i in range(len(self.robot_path)):
+                if i==0:
+                    continue
+                t = 0
+                if self.robot_duration[i]!=0:
+                    t = 10
+                qz, qw = yaw_to_qz_qw(self.robot_yaw[i]) 
+                file.write(str(t)+','+str(self.robot_path[i][0])+','+str(self.robot_path[i][1])+','+str(qz)+','+str(qw)+'\n')
+                #file.write(str(self.robot_duration[i])+','+str(self.robot_path[i][0])+','+str(self.robot_path[i][1])+','+str(self.robot_yaw[i])+','+str(self.robot_qw[i])+'\n')
 
 ##############################################################################################################################
 #####                                                                                                                    #####
@@ -967,6 +1348,14 @@ def yaw_to_qw(yaw):
     qw = np.cos(yaw/2)
     return qw
 
+def yaw_to_qz_qw(yaw):
+    qz = np.sin(yaw/2)
+    qw = np.cos(yaw/2)
+    return qz, qw 
+
+def q_to_yaw(qz,qw):
+    return math.atan2(2*qz*qw, 1-(2*qz*qz))
+
 ##############################################################################################################################
 #####                                                                                                                    #####
 ##### !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!         test run Unit         !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! #####
@@ -990,25 +1379,71 @@ if __name__ == "__main__":
     # x = [1.5, 1.5, 0.3, 0.3, -0.9, -0.9, -3.1, -3.1]
     # y = [0.9, -0.3, -0.3, 0.9, 0.3, -0.9, -0.9, 0.3]
 
-    x = [   -2.868809,   -3.178729,    2.134198,    2.458878,    1.263469,    2.665492,
-            -2.662194,   -2.721227,   -2.824534,   -4.093734,   -5.23011,    -9.465694,
-            -10.86772,   -11.88603,   -13.8341,    -13.71604,   -11.16288,   -12.29926,
-            -10.86671,    -9.907436,   -9.376143,   -9.346628,   -7.487102,   -7.516618,
-            -7.35428,    -7.295245,   -8.490656,   -8.667751,   -5.273382,   -5.450479,
-            -4.181279,   -4.406027,  -14.1392,    -14.18191,   -15.1707,    -18.41749,
-            -18.90451,   -14.78699,   -14.38835,   -13.57665,   -14.00463,    -8.898319,
-            -7.378232,   -7.153488,  -12.59924,    -7.05362,    -4.515223,   -3.290298,
-            -3.231264,   -3.54458,     4.882314,    5.3103,   ]
-    y =  [  1.006395,   -3.288222,   -3.657177,    0.5193763,   0.622683,    2.851161,
-            3.279147,    2.70358,     1.640994,    1.109702,    1.19825,     1.508172,
-            1.626236,    1.773818,    2.009948,    4.194151,    3.928505,   -3.893306,
-            -3.947384,   -3.90311,    -3.932626,   -2.707702,   -2.825767,   -4.13924,
-            -0.6858368,   0.6571531,   0.7899766,  -2.707702,    0.5243301,  -0.848177,
-            -0.9219675,  -4.255771,   -2.338892,   -3.422133,   -2.639953,   -3.746814,
-            -10.55346,   -10.87814,    -5.638999,   -5.72755,   -10.90765,   -11.23233,
-            -10.39112,    -6.767299,   -5.719471,   -6.098875,   -5.877501,   -5.715162,
-            -4.696852 , -10.0242 ,   -10.54074  ,  -4.371837 ]
+    # x = [   -2.868809,   -3.178729,    2.134198,    2.458878,    1.263469,    2.665492,
+    #         -2.662194,   -2.721227,   -2.824534,   -4.093734,   -5.23011,    -9.465694,
+    #         -10.86772,   -11.88603,   -13.8341,    -13.71604,   -11.16288,   -12.29926,
+    #         -10.86671,    -9.907436,   -9.376143,   -9.346628,   -7.487102,   -7.516618,
+    #         -7.35428,    -7.295245,   -8.490656,   -8.667751,   -5.273382,   -5.450479,
+    #         -4.181279,   -4.406027,  -14.1392,    -14.18191,   -15.1707,    -18.41749,
+    #         -18.90451,   -14.78699,   -14.38835,   -13.57665,   -14.00463,    -8.898319,
+    #         -7.378232,   -7.153488,  -12.59924,    -7.05362,    -4.515223,   -3.290298,
+    #         -3.231264,   -3.54458,     4.882314,    5.3103,   ]
+    # y =  [  1.006395,   -3.288222,   -3.657177,    0.5193763,   0.622683,    2.851161,
+    #         3.279147,    2.70358,     1.640994,    1.109702,    1.19825,     1.508172,
+    #         1.626236,    1.773818,    2.009948,    4.194151,    3.928505,   -3.893306,
+    #         -3.947384,   -3.90311,    -3.932626,   -2.707702,   -2.825767,   -4.13924,
+    #         -0.6858368,   0.6571531,   0.7899766,  -2.707702,    0.5243301,  -0.848177,
+    #         -0.9219675,  -4.255771,   -2.338892,   -3.422133,   -2.639953,   -3.746814,
+    #         -10.55346,   -10.87814,    -5.638999,   -5.72755,   -10.90765,   -11.23233,
+    #         -10.39112,    -6.767299,   -5.719471,   -6.098875,   -5.877501,   -5.715162,
+    #         -4.696852 , -10.0242 ,   -10.54074  ,  -4.371837 ]
 
+    x = [ -2.868809,   -3.178729,    2.134198,    2.458878,    1.263469,    2.665492,
+        -2.662194,   -2.721227,   -2.824534,   -4.093734,   -5.23011,    -9.465694,
+        -10.86772,   -11.88603,   -13.8341,    -13.71604,   -11.16288,   -12.29926,
+        -10.86671,    -9.907436,   -9.376143,   -9.346628,   -7.487102,   -7.516618,
+        -7.35428,    -7.295245,   -8.490656,   -8.667751,   -5.273382,   -5.450479,
+        -4.181279,   -4.406027,  -14.1392,    -14.18191,   -15.1707,    -18.41749,
+        -18.90451,   -14.78699,   -14.38835,   -13.57665,   -14.00463,    -8.898319,
+        -7.378232,   -7.153488,  -12.59924,    -7.05362,    -4.515223,   -3.290298,
+        -3.231264,   -3.54458,     4.882314,    5.3103,    -17.29193,   -17.13023,
+        -11.02171,   -10.98577,   -17.52548,   -17.34582,   -10.87798,   -10.78815,
+        -15.8895,    -15.47627,   -10.75115,   -10.4637,    -15.6188,    -15.43913,
+        -10.51638,   -10.39062,    -8.989254,   -9.204849,   -9.344091,   -9.380024,
+        -9.375332,   -9.487223,   -9.541122,    7.389399,    9.186024,    8.521273,
+        6.706682,   10.44366,    13.71352,    13.91114,    10.55146,     4.784107,
+        10.26381,     9.976351,   13.83909,    18.35345,    13.55647,    19.26973,
+        19.41238,    20.13103,    20.79578,    20.77781,    19.38692,    20.33913,
+        31.92088,    32.39985,    31.03441,    31.08831,    30.01034,    20.73976,
+        29.05929,    31.30507,    32.05965,    32.5088,     31.79016,    31.75423,
+        28.48437,    27.94538,    26.77758,    23.93891,    24.424,      24.49379,
+        22.33784,    22.07952,    17.67779,    17.28253,    17.22863,    20.44459,
+        21.66629,    13.88454,    14.23571,    10.7118,     14.51698,    14.60772,
+        15.09368,    11.57229,    15.98926,    12.45733,    18.13467,    18.35026,
+        9.528836,    8.127469,    7.983739 ]
+    y = [ 1.006395,   -3.288222,   -3.657177,    0.5193763,   0.622683,    2.851161,
+        3.279147,    2.70358,     1.640994,    1.109702,    1.19825,     1.508172,
+        1.626236,    1.773818,    2.009948,    4.194151,    3.928505,   -3.893306,
+        -3.947384,   -3.90311,    -3.932626,   -2.707702,   -2.825767,   -4.13924,
+        -0.6858368,   0.6571531,   0.7899766,  -2.707702,    0.5243301,  -0.848177,
+        -0.9219675,  -4.255771,   -2.338892,   -3.422133,   -2.639953,   -3.746814,
+        -10.55346,   -10.87814,    -5.638999,   -5.72755,   -10.90765,   -11.23233,
+        -10.39112,    -6.767299,   -5.719471,   -6.098875,   -5.877501,   -5.715162,
+        -4.696852,  -10.0242,    -10.54074,    -4.371837,    4.642451,    5.432966,
+        5.289236,    6.349244,    6.870265,    8.343496,    7.858408,    9.493336,
+        9.873585,   11.13122,    10.80783,    12.85598,    13.26791,    14.52555,
+        14.36385,    15.2442,     15.22623,    11.63299,    10.75405,     9.963538,
+        8.99235,     4.946264,    3.904222,   -2.143471,   -2.520761,   -8.126227,
+        -7.874701,   -6.922489,   -7.425544,   -6.275706,   -5.808584,  -12.30466,
+        -12.82568,    -8.316154,   -8.67548,    -9.056673,  -13.11704,   -13.53027,
+        -11.9672,    -11.93127,   -12.03907,   -12.81161,    -9.144747,   -9.180679,
+        -13.69664,    -7.392179,   -7.212516,   -6.457934,   -6.350137,   -5.613521,
+        -4.477412,   -4.710973,   -4.616134,    1.67205,     1.81578,     2.426632,
+        2.624261,   -4.418505,   -4.34664,    -4.113078,    3.055451,    4.555495,
+        4.771091,    1.213776,    1.537168,   -2.990325,   -3.565246,   -3.87067,
+        -3.942535,   -2.656886,    1.878522,    2.123971,    5.224082,    6.823626,
+        12.88626,    13.19168,    23.58042,    23.99623,    23.38537,    25.64912,
+        26.38573,    26.54743,    24.53521  ]
 
     p = np.array([x,y])
     # p = np.array([x, y])*4/90
@@ -1033,15 +1468,41 @@ if __name__ == "__main__":
     # t = [2, 4, 3, 4, 6, 5, 6, 8, 7, 8]
     # isWall = [0,0,0,0,0,0,0,0,0,0]
 
-    s       = [ 1 , 2,  3,  5,  1,  8,  7, 17, 16, 15, 33, 35, 36, 37, 38, 39, 39, 40, 41, 42, 43, 44, 46, 46,
-                47, 48, 50, 51, 52,  2, 14, 18, 19, 13, 20, 21, 21, 22, 23, 24, 32, 31, 30, 25, 31, 12, 11, 29,
-                26, 27,  5,  4,  8,  1, 10, 12, 14, 16, 33, 18, 40, 49, 19, 21, 28, 26, 29, 32]
-    t       = [ 2 , 3,  4,  1,  9,  7,  6,  7, 15, 33, 35, 36, 37, 38, 39, 34, 40, 41, 42, 43 ,44, 46, 45, 47,
-                48, 50, 51, 52,  3, 49, 18, 19, 13, 14, 12, 20, 22, 28, 24, 32, 31, 30, 25, 23, 10, 11, 29, 26,
-                27, 28,  4,  6,  9, 10, 11, 13, 15, 17, 34, 45, 45, 48, 20, 24, 23, 25, 30, 47]
-    isWall  = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    # s       = [ 1 , 2,  3,  5,  1,  8,  7, 17, 16, 15, 33, 35, 36, 37, 38, 39, 39, 40, 41, 42, 43, 44, 46, 46,
+    #             47, 48, 50, 51, 52,  2, 14, 18, 19, 13, 20, 21, 21, 22, 23, 24, 32, 31, 30, 25, 31, 12, 11, 29,
+    #             26, 27,  5,  4,  8,  1, 10, 12, 14, 16, 33, 18, 40, 49, 19, 21, 28, 26, 29, 32]
+    # t       = [ 2 , 3,  4,  1,  9,  7,  6,  7, 15, 33, 35, 36, 37, 38, 39, 34, 40, 41, 42, 43 ,44, 46, 45, 47,
+    #             48, 50, 51, 52,  3, 49, 18, 19, 13, 14, 12, 20, 22, 28, 24, 32, 31, 30, 25, 23, 10, 11, 29, 26,
+    #             27, 28,  4,  6,  9, 10, 11, 13, 15, 17, 34, 45, 45, 48, 20, 24, 23, 25, 30, 47]
+    # isWall  = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
-    
+    s = [  1,   2,   3,   5,   1,   8,   7,  17,  16,  15,  33,  35,  36,  37,  38,  39,  39,  40,
+    41,  42,  43,  44,  46,  46,  47,  48,  50,  51,  52,   2,  14,  18,  19,  13,  20,  21,
+    21,  22,  23,  24,  32,  31,  30,  25,  31,  12,  11,  29,  26,  27,   5,   4,   8,   1,
+    10,  12,  14,  16,  33,  18,  40,  49,  19,  21,  28,  26,  29,  32,  16,  53,  54,  55,
+    56,  57,  58,  59,  60,  61,  62,  63,  64,  65,  66,  67,  69,  71,  73,  68,  67,  63,
+    59,  70,  72,  55,  74,   6, 124, 128, 130, 135, 133, 132, 131, 129, 127, 125, 123,  76,
+    79,  78,  77,  51,  84,  85,  83,  80,  81,  82,  86,  87,  89,  90,  91,  92,  96,  88,
+    92,  93,  94,  97,  98,  99, 102, 102, 100, 104, 103, 105, 106, 107, 108, 109, 113, 113,
+    112, 117, 118, 119, 121, 116, 115, 115, 134, 130, 128, 126, 124,  52, 124,  77,  80,  78,
+    51,  81,  88, 122, 122,  82, 120, 120, 101, 111, 110, 121, 114,  60,  17,  75]
+    t = [  2,   3,   4,   1,   9,   7,   6,   7,  15,  33,  35,  36,  37,  38,  39,  34,  40,  41,
+    42,  43,  44,  46,  45,  47,  48,  50,  51,  52,   3,  49,  18,  19,  13,  14,  12,  20,
+    22,  28,  24,  32,  31,  30,  25,  23,  10,  11,  29,  26,  27,  28,   4,   6,   9,  10,
+    11,  13,  15,  17,  34,  45,  45,  48,  20,  24,  23,  25,  30,  47,  53,  54,  55,  56,
+    57,  58,  59,  60,  61,  62,  63,  64,  65,  66,  67,  68,  70,  72,  74,  69,  64,  60,
+    56,  71,  73,  17,  75, 124, 128, 130, 135, 134, 132, 131, 129, 127, 126, 123, 122,  79,
+    78,  77,  76,  84,  85,  86,  80,  81,  82,  83,  87,  89,  90,  91,  92,  96,  95,  87,
+    93,  94,  97,  98,  99, 100,  96, 101, 104, 105, 104, 106, 107, 108, 109, 110, 109, 112,
+    111, 118, 119, 120, 116, 117, 116, 114, 133, 129, 127, 125, 123,  76,  77,  83,  86,  86,
+    79,  87,  95, 118,  82, 102, 121, 102, 100, 110, 103, 112, 113,  73,  75,   7]
+    isWall  = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+               1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0,
+               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+               1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+               1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+               1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0,
+               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1]  
 
     con_e = np.array([s, t])
 
@@ -1051,15 +1512,39 @@ if __name__ == "__main__":
     # area_edges = np.array([[1, 3, 6, 2], [3, 4, 10, 7], [4, 5, 9], [7, 13, 8], [9, 12, 17, 11], [13, 14, 21, 15], [17, 19, 21, 18], [19, 20, 22], [15, 23, 24, 16]])
     # area_edges = np.array([s[1, 2, 4, 3], [4, 6, 7, 5], [7, 8, 10, 9]])
     
-    area_edges = np.array( [[1, 2, 3, 51, 4], [6, 53, 5, 4, 51, 52, 7],
-                            [9, 57, 34, 56, 46, 55, 54, 5, 53, 6, 8, 58],
-                            [10, 59, 16, 17, 61, 60, 31, 57], [13, 14, 15, 16, 59, 11, 12],
-                            [18, 19, 20, 21, 22, 23, 61],
-                            [60, 23, 24, 68, 40, 64, 36, 63, 32], [33, 63, 35, 56],
-                            [37, 64, 39, 65, 38], [50, 65, 44, 66, 49],
-                            [66, 43, 67, 48], [47, 67, 42, 45, 55],
-                            [45, 41, 68, 25, 62, 30, 1, 54], [30, 62, 26, 27, 28, 29, 2]])
+    # area_edges = np.array( [[1, 2, 3, 51, 4], [6, 53, 5, 4, 51, 52, 7],
+    #                         [9, 57, 34, 56, 46, 55, 54, 5, 53, 6, 8, 58],
+    #                         [10, 59, 16, 17, 61, 60, 31, 57], [13, 14, 15, 16, 59, 11, 12],
+    #                         [18, 19, 20, 21, 22, 23, 61],
+    #                         [60, 23, 24, 68, 40, 64, 36, 63, 32], [33, 63, 35, 56],
+    #                         [37, 64, 39, 65, 38], [50, 65, 44, 66, 49],
+    #                         [66, 43, 67, 48], [47, 67, 42, 45, 55],
+    #                         [45, 41, 68, 25, 62, 30, 1, 54], [30, 62, 26, 27, 28, 29, 2]])
 
+    area_edges = np.array( [[1, 2, 3, 51, 4],[6, 53, 5, 4, 51, 52, 7],
+    [9, 57, 34, 56, 46, 55, 54, 5, 53, 6, 8, 58],
+    [10, 59, 16, 17, 61, 60, 31, 57],[13, 14, 15, 16, 59, 11, 12],
+    [18, 19, 20, 21, 22, 23, 61],
+    [60, 23, 24, 68, 40, 64, 36, 63, 32],[33, 63, 35, 56],
+    [37, 64, 39, 65, 38],[50, 65, 44, 66, 49],
+    [66, 43, 67, 48],[47, 67, 42, 45, 55],
+    [45, 41, 68, 25, 62, 30, 1, 54],[30, 62, 26, 27, 28, 29, 2],
+    [70, 69, 58, 94, 71],[74, 73, 91, 75],[78, 77, 90, 79],
+    [82, 81, 89, 83],[84, 89, 80, 90, 176, 93, 86, 92, 85, 88],
+    [76, 91, 72, 94, 177, 95, 87, 176],
+    [52, 3, 29, 158, 111, 159, 96],[28, 163, 108, 158],
+    [163, 112, 113, 114, 162, 109],[110, 162, 161, 115, 160],
+    [159, 160, 118, 167, 107, 157],[161, 119, 164, 116],
+    [167, 168, 170, 148, 147, 166],
+    [117, 164, 126, 165, 125, 133, 168],
+    [120, 121, 122, 123, 124, 125, 165, 126],
+    [170, 134, 171, 135, 137, 173, 172, 145, 174, 169],
+    [146, 147, 148, 169, 149, 150],
+    [133, 124, 127, 128, 129, 130, 131, 132, 171, 134],
+    [142, 173, 137, 136, 138, 139, 140, 141],
+    [144, 145, 172, 142, 143],[151, 149, 174, 144, 175, 152],
+    [97, 157, 106, 156, 105, 155],[98, 155, 104, 154],
+    [100, 99, 154, 103, 102, 101, 153]])
 
     # connectivity areas (drag and draw)
     # s = [1,  1, 2, 3, 4,  4, 5, 6, 7, 8,  8,  9, 10, 11, 12, 12, 13, 15, 16, 17, 17, 18]
@@ -1074,16 +1559,21 @@ if __name__ == "__main__":
     # s = [1, 2]
     # t = [2, 3]
 
-    s = [ 1,  2,  3,  3,  3,  3,  4,  4,  4, 13,  7,  7,  9, 10, 11,  7]
-    t = [ 2,  3, 13, 12,  8,  4,  5,  7,  6, 14,  8,  9, 10, 11, 12, 13]
+    # s = [ 1,  2,  3,  3,  3,  3,  4,  4,  4, 13,  7,  7,  9, 10, 11,  7]
+    # t = [ 2,  3, 13, 12,  8,  4,  5,  7,  6, 14,  8,  9, 10, 11, 12, 13]
+
+    s = [37, 36, 25, 21, 21, 24, 24, 23, 22, 26, 28, 25, 27, 30, 27, 30, 30, 30, 30, 19,  1,  2,  2,  3,
+    3,  3,  3,  3,  4,  4,  4, 13,  7,  7,  9, 10, 11,  7, 18, 17, 16, 15]
+    t = [38, 37, 36, 22, 25, 25, 26, 24, 23, 28, 29, 27, 28, 31, 30, 32, 34, 33, 35, 20,  2, 21,  3, 13,
+    12,  8,  4, 15,  5,  7,  6, 14,  8,  9, 10, 11, 12, 13, 19, 19, 20, 20]
 
     con_a = np.array([s, t])
 
     #----------------------------------Construction Graph---------------------------------------------------------------#
     CPP = coveragePathPlanning(p, con_e, isWall, area_edges, con_a, True)
     CPP.initialize_graphs()
-    # CPP.visual_area()
+    CPP.visual_area()
 
-    CPP.generate_robotWorkFlowPath([[-10,0], [-10,-10]], [[0, -8], [0,0]], [1, 4, 2, 5, 10, 13, 3, 8, 9, 11, 14])
+    CPP.generate_robotWorkFlowPath([[0,0]], [[0,0]], [1, 3, 5, 38, 20, 15, 12, 32, 18])
     
     print("")
