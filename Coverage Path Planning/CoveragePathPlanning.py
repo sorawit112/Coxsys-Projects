@@ -40,11 +40,11 @@ class infrastructureGraph:
         self.con_a = connectivity_areas
         self.VISUAL = visual
 
-##############################################################################################################################
-#####                                                                                                                    #####
-#####                                             construct graph                                                        #####
-#####                                                                                                                    #####
-##############################################################################################################################
+    ##############################################################################################################################
+    #####                                                                                                                    #####
+    #####                                             construct graph                                                        #####
+    #####                                                                                                                    #####
+    ##############################################################################################################################
 
     def initialize_graphs(self):
         self.wallGraphInit()
@@ -225,11 +225,11 @@ class coveragePathPlanning(infrastructureGraph):
         self.robot_clean_radius = []
         self.robot_clean_status = []
 
-##############################################################################################################################
-#####                                                                                                                    #####
-#####                                             main function                                                          #####
-#####                                                                                                                    #####
-##############################################################################################################################
+    ##############################################################################################################################
+    #####                                                                                                                    #####
+    #####                                             main function                                                          #####
+    #####                                                                                                                    #####
+    ##############################################################################################################################
 
     def generate_robotWorkFlowPath(self, start_pose, goal_pose, cleaning_area):        
         self.fleet_management( start_pose, goal_pose, cleaning_area)
@@ -329,11 +329,11 @@ class coveragePathPlanning(infrastructureGraph):
         if self.VISUAL:
             self.visualize_path()
     
-##############################################################################################################################
-#####                                                                                                                    #####
-#####                                          coverage path planning part                                               #####
-#####                                                                                                                    #####
-##############################################################################################################################
+    ##############################################################################################################################
+    #####                                                                                                                    #####
+    #####                                          coverage path planning part                                               #####
+    #####                                                                                                                    #####
+    ##############################################################################################################################
     def fleet_management(self, start_pose, goal_pose, cleaning_area):
         n_robot = len(start_pose)
         
@@ -574,22 +574,22 @@ class coveragePathPlanning(infrastructureGraph):
             print('cleaning areas : ', self.cleanning_area[r])
             print('generating area paths\n')
 
-            # sort cleaning area step sorted by (minimum direction from from_area to to_area)       **if goal area is in cleaning area so fix that cleaning area as end cleaning area
-            flag_start = False
-            flag_goal = False
-            
+            # sort cleaning area step sorted by (minimum direction from from_area to to_area)       **if goal area is in cleaning area so fix that cleaning area as end cleaning area            
             cleaning_step = []
-            
+            flag_goal = False
+
             self.area_path[r] += [self.start_area[r]]
             
             if self.start_area[r] in self.cleanning_area[r]:
                 cleaning_step += [self.start_area[r]]
+                self.clean_path[r] += [1]
                 self.cleanning_area[r].pop(self.cleanning_area[r].index(self.start_area[r]))
-                flag_start = True
+            else:
+                self.clean_path[r] += [0]
+
             if self.goal_area[r] in self.cleanning_area[r]:
-                cleaning_step += [self.goal_area[r]]
-                self.cleanning_area[r].pop(self.cleanning_area[r].index(self.goal_area[r]))
                 flag_goal = True
+                self.cleanning_area[r].pop(self.cleanning_area[r].index(self.goal_area[r]))
             
             while len(self.cleanning_area[r]) != 0:
                 path_list = []
@@ -597,15 +597,10 @@ class coveragePathPlanning(infrastructureGraph):
                 for i in self.cleanning_area[r]:
                     to_area = i
                     
-                    if flag_start and not flag_goal:
-                        from_area = cleaning_step[len(cleaning_step)-1]
-                    elif not flag_start and flag_goal:
-                        if len(cleaning_step) == 0:
-                            from_area = self.start_area[r]
-                        else:
-                            from_area = cleaning_step[len(cleaning_step)-2]
+                    if len(cleaning_step) == 0:
+                        from_area = self.start_area[r]
                     else:
-                        from_area = cleaning_step[len(cleaning_step)-2]
+                        from_area = cleaning_step[len(cleaning_step)-1]                  
                         
                     path,dist = self.find_shortest_path(from_area, to_area)
                     
@@ -616,174 +611,30 @@ class coveragePathPlanning(infrastructureGraph):
                 min_idx = dist_list.index(min_dist)
                 
                 min_path = path_list[min_idx]
-                
-                if flag_start and not flag_goal:
-                    cleaning_step.append(self.cleanning_area[r][min_idx])
-                elif not flag_start and flag_goal:
-                    cleaning_step.insert(len(cleaning_step)-1, self.cleanning_area[r][min_idx])
-                else:
-                    cleaning_step.insert(len(cleaning_step)-1, self.cleanning_area[r][min_idx])
+
+                cleaning_step.append(self.cleanning_area[r][min_idx])
 
                 self.area_path[r] += min_path[1:]
-                self.cleanning_area[r].pop(min_idx)
-                
-        
-            print(cleaning_step)
-               
-                    
-                        
-                        
-                    
-                    
-                    
-                
-        
-            
-           #################################################################################################################################################### 
-            
-            # bi-directional graph search
-            current_graph_front = [self.start_area[r]]
-            current_graph_back = [self.goal_area[r]]
-            connect_graph = []
-
-            while True:
-                while (k <= max_iter):
-                    temp_graph_front = []
-                    temp_graph_back = []
-                            
-                    if type(current_graph_front[0]) == int: #first time boths are int
-                        neighbor_list_front = [[n] for n in self.area_graph.neighbors(current_graph_front[0])]
-                        temp_graph_front = np.concatenate((matlib.repmat(current_graph_front, len(neighbor_list_front),1), neighbor_list_front), axis = 1)
-
-                        neighbor_list_back = [[n] for n in self.area_graph.neighbors(current_graph_back[0])]
-                        temp_graph_back = np.concatenate((matlib.repmat(current_graph_back, len(neighbor_list_back),1), neighbor_list_back), axis = 1)
-                    else: 
-                        graph_i_front = []
-                        graph_i_back = []
-                        num_front = len(current_graph_front[0])
-                        num_back = len(current_graph_back[0])
-
-                        for i in range(len(current_graph_front)):
-                            neighbor_list_front = [[n] for n in self.area_graph.neighbors(current_graph_front[i][num_front-1])]
-                            graph_i_front = np.concatenate((matlib.repmat(current_graph_front[i], len(neighbor_list_front), 1), neighbor_list_front), axis = 1)
-                            
-                            if i == 0:
-                                temp_graph_front = graph_i_front
-                            else:
-                                temp_graph_front = np.concatenate((temp_graph_front, graph_i_front))
-                            
-                        for i in range(len(current_graph_back)):
-                            neighbor_list_back = [[n] for n in self.area_graph.neighbors(current_graph_back[i][num_back-1])]
-                            graph_i_back = np.concatenate((matlib.repmat(current_graph_back[i], len(neighbor_list_back), 1), neighbor_list_back), axis = 1)
-
-                            if i == 0:
-                                temp_graph_back = graph_i_back
-                            else:
-                                temp_graph_back = np.concatenate((temp_graph_back, graph_i_back))
-
-                    current_graph_front = temp_graph_front
-                    current_graph_back = temp_graph_back
-
-                    for i in range(len(current_graph_front)):
-                        diff_list = np.subtract(current_graph_back, current_graph_front[i])
-                        end_diff_list = np.transpose(diff_list)[len(diff_list[0])-1]
-                        if set(self.cleanning_area[r]).issubset(set(current_graph_front[i])) and current_graph_front[i][-1] == self.goal_area[r]:
-                            candidate.append(current_graph_front[i])
-                            break
-                        if 0 in end_diff_list:
-                            zero_index_list = [x for x in range(len(end_diff_list)) if end_diff_list[x] == 0]
-                            [connect_graph.append(list(current_graph_front[i]) + list(current_graph_back[z][::-1][1:])) for z in zero_index_list]
-                    
-                    candidate += [path_list for path_list in connect_graph if set(self.cleanning_area[r]).issubset(set(path_list))]
-                    
-                    k = k+1
-
-                if len(candidate) == 0:
-                    max_iter = max_iter+1
-                else:
-                    break
-
-            # find minimum path
-            dist_path = []
-            for candi_i in candidate:
-                path_edge = [list(set([e for e in self.area_graph._node[candi_i[x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[candi_i[x+1]]['area_edges']]))) for x in range(len(candi_i)-1)]
-                filter_edge = []
-                for i in path_edge:
-                    if len(i) > 1:
-                        for j in i:
-                            if not self.wall_graph[self.wall_edges_dict[j][0]][self.wall_edges_dict[j][1]]['isWall'] :
-                                filter_edge.append(j)
+                for i in range(1, len(min_path)):
+                    if i != len(min_path)-1:
+                        self.clean_path[r] += [0]
                     else:
-                        filter_edge.append(i[0])
+                        self.clean_path[r] += [1]
 
-                node_idx = [[self.mid_edges_graph._node[y]['edge_Number'] for y in self.mid_edges_graph._node].index(x)+1 for x in filter_edge]
-                dist_temp = 0
-
-                for idx in range(len(node_idx)-1):
-                    current_node = node_idx[idx]
-                    next_node = node_idx[idx+1]
-                    if next_node - current_node != 0:
-                        dist_temp = dist_temp + self.mid_edges_graph[current_node][next_node]['weight']
-                dist_path.append(dist_temp)
-
-            min_dist = min(dist_path)
-            min_dist_idx = dist_path.index(min_dist)
-
-            path_n_temp = list(candidate[min_dist_idx])
-
-            cleanList = self.cleanning_area[r]
-            path_clean_temp = []
-            for i in range(len(path_n_temp)):
-                if path_n_temp[i] in cleanList:
-                    path_clean_temp.append(1)
-                    cleanList.pop(cleanList.index(path_n_temp[i]))
-                else:
-                    path_clean_temp.append(0)
-
-            path_n = []
-            path_clean = []
-
-            end_temp = -1
+                self.cleanning_area[r].pop(min_idx)        
             
-            # filter unnecessory path
-            while len(path_n_temp) > 3:
-                node1 = path_n_temp[0]
-                node2 = path_n_temp[1]
-                node3 = path_n_temp[2]
-                clean1 = path_clean_temp[0]
-                clean2 = path_clean_temp[1]
-                clean3 = path_clean_temp[2]
+            if flag_goal:
+                go_to_goal_path, dist = self.find_shortest_path(cleaning_step[-1], self.goal_area[r])            
+                self.area_path[r] += go_to_goal_path[1:]
+                self.clean_path[r] += [0 for i in range(len(go_to_goal_path) - 2)]
+                self.clean_path[r] += [1]
+            else:
+                go_to_goal_path, dist = self.find_shortest_path(cleaning_step[-1], self.goal_area[r])            
+                self.area_path[r] += go_to_goal_path[1:]
+                self.clean_path[r] += [0 for i in range(len(go_to_goal_path) - 1)]   
 
-                if node1 == node3 and clean2 == 0:
-                    path_n += [node1]
-                    path_clean += [clean1]
 
-                    end_temp =  node3
-
-                    path_n_temp.pop(0)
-                    path_n_temp.pop(0)
-                    path_n_temp.pop(0)
-                    path_clean_temp.pop(0)
-                    path_clean_temp.pop(0)
-                    path_clean_temp.pop(0)
-
-                elif end_temp == node2 and clean1 == 0:
-                    path_n_temp.pop(0)
-                    path_n_temp.pop(0)
-                    path_clean_temp.pop(0)
-                    path_clean_temp.pop(0)
-
-                else:
-                    path_n += [node1]
-                    path_clean += [clean1]
-
-                    path_n_temp.pop(0)
-                    path_clean_temp.pop(0)
-            
-            path_n += path_n_temp
-            path_clean += path_clean_temp
-        
-            mid_edge_path = [list(set([e for e in self.area_graph._node[path_n[x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[path_n[x+1]]['area_edges']]))) for x in range(len(path_n)-1)]
+            mid_edge_path = [list(set([e for e in self.area_graph._node[self.area_path[r][x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[self.area_path[r][x+1]]['area_edges']]))) for x in range(len(self.area_path[r])-1)]
             
             filter_mid_edge_path = []
             for i in mid_edge_path:
@@ -794,8 +645,6 @@ class coveragePathPlanning(infrastructureGraph):
                 else:
                     filter_mid_edge_path.append(i[0])
 
-            self.area_path[r] = path_n
-            self.clean_path[r] = path_clean
             self.mid_edge_path_idx[r] = [[self.mid_edges_graph._node[y]['edge_Number'] for y in self.mid_edges_graph._node].index(x)+1 for x in filter_mid_edge_path]
 
             print('finish generated area paths for robot : ' + str(r))
@@ -1216,14 +1065,14 @@ class coveragePathPlanning(infrastructureGraph):
     def writeText(self):
         for r in range(len(self.robot_path)):
             file = open("robot "+str(r+1) + ".txt","w+")
-            for i in range(len(self.robot_path)):
+            for i in range(len(self.robot_path[r])):
                 if i==0:
                     continue
                 t = 0
-                if self.robot_duration[i]!=0:
+                if self.robot_duration[r][i] != 0:
                     t = 10
-                qz, qw = yaw_to_qz_qw(self.robot_yaw[i]) 
-                file.write(str(t)+','+str(self.robot_path[i][0])+','+str(self.robot_path[i][1])+','+str(qz)+','+str(qw)+'\n')
+                qz, qw = yaw_to_qz_qw(self.robot_yaw[r][i]) 
+                file.write(str(t)+','+str(self.robot_path[r][i][0])+','+str(self.robot_path[r][i][1])+','+str(qz)+','+str(qw)+'\n')
                 #file.write(str(self.robot_duration[i])+','+str(self.robot_path[i][0])+','+str(self.robot_path[i][1])+','+str(self.robot_yaw[i])+','+str(self.robot_qw[i])+'\n')
 
 ##############################################################################################################################
@@ -1572,8 +1421,8 @@ if __name__ == "__main__":
     #----------------------------------Construction Graph---------------------------------------------------------------#
     CPP = coveragePathPlanning(p, con_e, isWall, area_edges, con_a, True)
     CPP.initialize_graphs()
-    CPP.visual_area()
+    # CPP.visual_area()
 
-    CPP.generate_robotWorkFlowPath([[0,0]], [[0,0]], [1, 3, 5, 38, 20, 15, 12, 32, 18])
+    CPP.generate_robotWorkFlowPath([[0,0],[0,0]], [[0,0],[0,0]], [1,21,30,18,5,38,32])
     
     print("")
