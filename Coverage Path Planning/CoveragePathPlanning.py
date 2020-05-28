@@ -337,9 +337,9 @@ class coveragePathPlanning(infrastructureGraph):
     def fleet_management(self, start_pose, goal_pose, cleaning_area):
         n_robot = len(start_pose)
         
-        area_cleaning = [self.area_graph._node[a]['area'] for a in cleaning_area]
-        area_cleaning_sorted = sorted(area_cleaning)[::-1]
-        avg_area = sum(area_cleaning)/len(cleaning_area)
+        # area_cleaning = [self.area_graph._node[a]['area'] for a in cleaning_area]
+        # area_cleaning_sorted = sorted(area_cleaning)[::-1]
+        # avg_area = sum(area_cleaning)/len(cleaning_area)
         
         for r in range(n_robot):
             start_point = start_pose[r]
@@ -389,8 +389,7 @@ class coveragePathPlanning(infrastructureGraph):
         min_max_x = [sorted(all_centroid_x)[0], sorted(all_centroid_x)[-1]]
         min_max_y = [sorted(all_centroid_y)[0], sorted(all_centroid_y)[-1]]
          
-        center_p = [min_max_x[1] - (min_max_x[1]-min_max_x[0])/2, min_max_y[1] - (min_max_y[1]-min_max_y[0])/2 ]
-        # center_p = self.area_graph._node[center]['centroid']
+        center_p = [min_max_x[1] - (min_max_x[1]-min_max_x[0])/2, min_max_y[1] - (min_max_y[1]-min_max_y[0])/2]
         num_divide = n_robot       
         step_angle = round(360/num_divide)
         scope_angle = [[np.deg2rad(i), np.deg2rad(i+step_angle)] for i in range(0,360,step_angle)]
@@ -405,8 +404,57 @@ class coveragePathPlanning(infrastructureGraph):
             index_robot = [x for x in range(len(scope_angle)) if angle_a >= scope_angle[x][0] and angle_a < scope_angle[x][1]][0]
             self.cleanning_area[index_robot].append(a)
             
-            
+
+        # share load
+        if n_robot > 1:
+            flag_balance = False
+
+            average_load = sum([self.area_graph._node[a]['area'] for a in cleaning_area])/len(cleaning_area)
+
+            while not flag_balance:
+                unequal_load_list = []
+                for r in range(n_robot):   # calculate unequal load of every robots
+                    if len(self.cleanning_area[r]) != 0:
+                        unequal_load_list.append(abs(average_load - sum([self.area_graph._node[a]['area'] for a in self.cleanning_area[r]])))
+                    else:
+                        unequal_load_list.append(average_load)
+                max_unequal_index = unequal_load_list.index(max(unequal_load_list)) 
+                # find best robot to share load if robot > 2
+                share_load_list = []
+                current_unequal_load = self.calculate_unequal_load(cleaning_area)
+                
+                area = self.cleanning_area[max_unequal_index][0]
+                self.cleanning_area[max_unequal_index].pop(0)         
+                for r in range(n_robot):
+                    if r != max_unequal_index:
+                        self.cleanning_area[r].append(area)
+                        share_load_list.append(self.calculate_unequal_load(cleaning_area))
+                        self.cleanning_area[r].pop(len(self.cleanning_area[r])-1)
+                self.cleanning_area[max_unequal_index].insert(0,area)
+
+                if all(share_load_list >= current_unequal_load):
+                    flag_balance = True
+                    break
+                
+                
+                
+                    
+
         self.generate_areaPath_v2()
+
+    def calculate_unequal_load(self, cleaning_area):
+        n_robot = len(self.start_area)
+
+        unequal_load = 0        
+        average_load = sum([self.area_graph._node[a]['area'] for a in cleaning_area])/len(cleaning_area)
+        
+        for r in range(n_robot):
+            if len(self.cleanning_area[r]) != 0:
+                unequal_load += abs(average_load - sum([self.area_graph._node[a]['area'] for a in self.cleanning_area[r]]))
+            else:
+                unequal_load += average_load
+
+        return unequal_load
        
     def generate_areaPath(self):   
         max_iter = self.max_iteration_area_search
@@ -1419,6 +1467,6 @@ if __name__ == "__main__":
     CPP.initialize_graphs()
     # CPP.visual_area()
 
-    CPP.generate_robotWorkFlowPath([[-10,-6],[-16,-6]], [[0,0],[0,0]], [1,21,30,18,5,38,32])
+    CPP.generate_robotWorkFlowPath([[-10,-6],[0,0],[0,0]], [[0,0],[0,0],[0,0]], [1,21,30,15,18,5,38,32])
     
     print("")
