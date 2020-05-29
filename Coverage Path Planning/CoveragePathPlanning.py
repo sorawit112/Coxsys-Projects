@@ -167,7 +167,8 @@ class infrastructureGraph:
             point_b = self.wall_graph[edge_b[0]][edge_b[1]]['midEdge']
 
             mid_edge_idx = [node_mid_edge.index(x[0])+1, node_mid_edge.index(x[1])+1]
-            weight = sum((point_a-point_b)**2)
+            # weight = sum((point_a-point_b)**2)
+            weight = int(math.hypot((point_a[0] - point_b[0]),(point_a[1] - point_b[1])))
 
             self.mid_edges_graph.add_edge(mid_edge_idx[0], mid_edge_idx[1], weight = weight)
 
@@ -337,10 +338,6 @@ class coveragePathPlanning(infrastructureGraph):
     def fleet_management(self, start_pose, goal_pose, cleaning_area):
         n_robot = len(start_pose)
         
-        # area_cleaning = [self.area_graph._node[a]['area'] for a in cleaning_area]
-        # area_cleaning_sorted = sorted(area_cleaning)[::-1]
-        # avg_area = sum(area_cleaning)/len(cleaning_area)
-        
         for r in range(n_robot):
             start_point = start_pose[r]
             goal_point = goal_pose[r]
@@ -366,22 +363,8 @@ class coveragePathPlanning(infrastructureGraph):
 
                 i = i + 1
             
-            # self.cleanning_area.append([cleaning_area[area_cleaning.index(area_cleaning_sorted[0])]])
-            # area_cleaning_sorted.pop(0)
             self.cleanning_area.append([])
 
-        # for j in area_cleaning_sorted:
-        #     sum_avg_list = []
-        #     error_avg_list = []
-            
-        #     for i in range(n_robot):
-        #         sum_avg_list.append(sum([self.area_graph._node[a]['area'] for a in self.cleanning_area[i]]) + j)
-        #         error_avg_list.append(abs(avg_area - sum_avg_list[i]))
-
-        #     min_error = min(error_avg_list)
-        #     self.cleanning_area[error_avg_list.index(min_error)].append(cleaning_area[area_cleaning.index(j)])
-
-        
         # !-------- sprit zone as a circle -----------!  * case start area and goal as a same area in all robot
         all_centroid_x = [self.area_graph._node[a]['centroid'][0] for a in self.area_graph._node]
         all_centroid_y = [self.area_graph._node[a]['centroid'][1] for a in self.area_graph._node]
@@ -415,44 +398,82 @@ class coveragePathPlanning(infrastructureGraph):
                 unequal_load_list = []
                 for r in range(n_robot):   # calculate unequal load of every robots
                     if len(self.cleanning_area[r]) != 0:
-                        unequal_load_list.append(abs(average_load - sum([self.area_graph._node[a]['area'] for a in self.cleanning_area[r]])))
+                        unequal_load_list.append(sum([self.area_graph._node[a]['area'] for a in self.cleanning_area[r]]))
                     else:
-                        unequal_load_list.append(average_load)
+                        unequal_load_list.append(0)
                 max_unequal_index = unequal_load_list.index(max(unequal_load_list)) 
+                
                 # find best robot to share load if robot > 2
                 share_load_list = []
-                current_unequal_load = self.calculate_unequal_load(cleaning_area)
+                current_unequal_load = self.sum_unequal_load(cleaning_area)
                 
-                area = self.cleanning_area[max_unequal_index][0]
-                self.cleanning_area[max_unequal_index].pop(0)         
-                for r in range(n_robot):
-                    if r != max_unequal_index:
-                        self.cleanning_area[r].append(area)
-                        share_load_list.append(self.calculate_unequal_load(cleaning_area))
-                        self.cleanning_area[r].pop(len(self.cleanning_area[r])-1)
-                self.cleanning_area[max_unequal_index].insert(0,area)
+                for i in range(len(self.cleanning_area[max_unequal_index])):
+                    area = self.cleanning_area[max_unequal_index][i]
+                    self.cleanning_area[max_unequal_index].pop(i)     
+                    share_load_list.append([])    
+                    for r in range(n_robot):
+                        if r != max_unequal_index:
+                            self.cleanning_area[r].append(area)
+                            share_load_list[len(share_load_list)-1].append(self.sum_unequal_load(cleaning_area))
+                            self.cleanning_area[r].pop(len(self.cleanning_area[r])-1)
+                        else:
+                            share_load_list[len(share_load_list)-1].append(10000000)
+                    self.cleanning_area[max_unequal_index].insert(i,area)
 
-                if all(share_load_list >= current_unequal_load):
-                    flag_balance = True
+                min_share_load_robot = min(share_load_list)
+                robot_index = min(share_load_list).index(min(min_share_load_robot))
+
+                min_share_load_area = min_share_load_robot[robot_index]
+                area_index = list(np.transpose(share_load_list)[robot_index]).index(min_share_load_area)
+
+                # self.cleanning_area[robot_index].append(self.cleanning_area[max_unequal_index][area_index])
+                # self.cleanning_area[max_unequal_index].pop(area_index)
+
+                # find closet area to share
+                distance_weight_list = []
+                for i in self.cleanning_area[max_unequal_index]:
+                    from_node = self.area_graph._node[i]['centroid']
+                    dist = 0
+                    if len(self.cleanning_area[robot_index]) != 0:
+                        for j in self.cleanning_area[robot_index]:
+                            path, dist_ = self.find_shortest_path(i, j)
+                            dist += dist_
+                    else:
+                        path, dist_ = self.find_shortest_path(i, self.start_area[robot_index])
+                        dist += dist_
+                    distance_weight_list.append(dist)
+                
+                closet_index = distance_weight_list.index(min(distance_weight_list))
+                self.cleanning_area[robot_index].append(self.cleanning_area[max_unequal_index][closet_index])
+                self.cleanning_area[max_unequal_index].pop(closet_index)
+                
+                next_unequal_load = self.sum_unequal_load(cleaning_area)
+                if next_unequal_load - current_unequal_load >= 0:   #if share sum_load is increse then break
+                    self.cleanning_area[max_unequal_index].append(self.cleanning_area[robot_index][-1])
+                    self.cleanning_area[robot_index].pop(len(self.cleanning_area[robot_index])-1)
                     break
-                
-                
-                
-                    
 
-        self.generate_areaPath_v2()
+        self.generate_areaPath_v3()
 
-    def calculate_unequal_load(self, cleaning_area):
+    def sum_unequal_load(self, cleaning_area):
         n_robot = len(self.start_area)
 
         unequal_load = 0        
         average_load = sum([self.area_graph._node[a]['area'] for a in cleaning_area])/len(cleaning_area)
         
-        for r in range(n_robot):
-            if len(self.cleanning_area[r]) != 0:
-                unequal_load += abs(average_load - sum([self.area_graph._node[a]['area'] for a in self.cleanning_area[r]]))
-            else:
-                unequal_load += average_load
+        for r1 in range(n_robot):
+            for r2 in range(r1, n_robot):
+                if len(self.cleanning_area[r1]) != 0:
+                    load_r1 = sum([self.area_graph._node[a]['area'] for a in self.cleanning_area[r1]])
+                else:
+                    load_r1 = 0
+                
+                if len(self.cleanning_area[r2]) != 0:
+                    load_r2 = sum([self.area_graph._node[a]['area'] for a in self.cleanning_area[r2]])
+                else:
+                    load_r2 = 0
+                
+                unequal_load += abs(load_r1 - load_r2)
 
         return unequal_load
        
@@ -703,7 +724,6 @@ class coveragePathPlanning(infrastructureGraph):
                 self.clean_path[r] += [0 for i in range(len(go_to_goal_path) - 2)]
                 self.clean_path[r] += [1]
             else:
-
                 go_to_goal_path, dist = self.find_shortest_path(cleaning_step[-1], self.goal_area[r])            
                 self.area_path[r] += go_to_goal_path[1:]
                 self.clean_path[r] += [0 for i in range(len(go_to_goal_path) - 1)]   
@@ -728,6 +748,107 @@ class coveragePathPlanning(infrastructureGraph):
             print('\n')
 
         return None
+
+    def generate_areaPath_v3(self):
+        n_robot = len(self.start_area)
+
+        for r in range(n_robot):
+            self.area_path.append([])
+            self.clean_path.append([])
+            self.mid_edge_path_idx.append([])
+
+            data = {}
+            data['location'] = []
+            locations = []
+            # if self.start_area[r] not in self.cleanning_area[r]:
+            #     data['location'] += [tuple(self.area_graph._node[self.start_area[r]]['centroid'])]
+            #     locations.append(self.start_area[r])
+
+            for i in self.cleanning_area[r]:
+                data['location'] += [tuple(self.area_graph._node[i]['centroid'])]
+                locations.append(i)
+            
+
+            # if self.goal_area[r] not in self.cleanning_area[r]:
+            #     data['location'] += [tuple(self.area_graph._node[self.goal_area[r]]['centroid'])]
+            #     locations.append(self.goal_area[r])
+
+            # if self.goal_area[r] == self.start_area[r]:
+            #     data['location'] += [tuple(self.area_graph._node[self.goal_area[r]]['centroid'])]
+            #     locations.append(self.goal_area[r])
+
+            data['num_vehicles'] = 1
+            data['depot'] = 1
+
+            distances = {}
+            for from_counter, from_node in enumerate(locations):
+                distances[from_counter] = {}
+                for to_counter, to_node in enumerate(locations):
+                    if from_counter == to_counter:
+                        distances[from_counter][to_counter] = 0
+                    else:
+                        path,dist_ = self.find_shortest_path(from_node, to_node)
+                        distances[from_counter][to_counter] = dist_                        
+
+            # ortools algorithm part
+            manager = pywrapcp.RoutingIndexManager(len(data['location']), data['num_vehicles'], data['depot'])        
+            rounting = pywrapcp.RoutingModel(manager)
+
+            distance_matrix = distances   
+
+            def distance_callback(from_index, to_index):
+                from_node = manager.IndexToNode(from_index)
+                to_node = manager.IndexToNode(to_index)
+                return distance_matrix[from_node][to_node] 
+
+            transit_callback_index = rounting.RegisterTransitCallback(distance_callback)
+
+            rounting.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
+
+            search_parameters = pywrapcp.DefaultRoutingSearchParameters()
+            search_parameters.first_solution_strategy = (routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC)
+
+            solution = rounting.SolveWithParameters(search_parameters) 
+
+            if solution:
+                index = rounting.Start(0)
+                best_state = []
+                route_distance = 0
+                while not rounting.IsEnd(index):
+                    best_state += [manager.IndexToNode(index)]
+                    index = solution.Value(rounting.NextVar(index))
+
+            # sorted to fixed start fixed stop sequence and filter dummy node out 
+            n_state = len(best_state)
+
+            ind_start = best_state.index(0)
+            ind_end = best_state.index(n_state-2)
+            ind_dummy = best_state.index(n_state-1)
+
+            if ind_dummy > 0 and ind_dummy < n_state-1:
+                if ind_start < ind_end:
+                    ind_via_points = best_state[0:ind_start+1][::-1] + best_state[ind_end:][::-1]
+                else:
+                    ind_via_points = best_state[ind_start:] + best_state[0:ind_end+1]
+            elif ind_dummy == 0:
+                if ind_start == 1:
+                    ind_via_points = best_state[1:]
+                elif ind_start == n_state-1:
+                    ind_via_points = best_state[1:][::-1]
+            elif ind_dummy == n_state-1:
+                if ind_start == n_state-2:
+                    ind_via_points = best_state[0:n_state-1][::-1]
+                elif ind_start == 0:
+                    ind_via_points = best_state[0:n_state-1]
+
+            # map index to via-points
+            for j in ind_via_points:
+                if j != 0 and j != len(ind_via_points)-1:
+                    self.area_path[r] += locations[j]
+                    
+
+
+        
     
     def find_shortest_path(self, from_area, to_area):
         k = 1
@@ -850,7 +971,7 @@ class coveragePathPlanning(infrastructureGraph):
         data['depot'] = 1
         
         locations = data['location']
-
+        
         # create distances matrix for ortools
         distances = {}
         for from_counter, from_node in enumerate(locations):
@@ -1467,6 +1588,6 @@ if __name__ == "__main__":
     CPP.initialize_graphs()
     # CPP.visual_area()
 
-    CPP.generate_robotWorkFlowPath([[-10,-6],[0,0],[0,0]], [[0,0],[0,0],[0,0]], [1,21,30,15,18,5,38,32])
+    CPP.generate_robotWorkFlowPath([[0,0]], [[12,20]], [1,6,21,25,30,37])
     
     print("")
