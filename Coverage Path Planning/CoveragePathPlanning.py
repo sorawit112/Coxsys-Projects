@@ -204,6 +204,7 @@ class coveragePathPlanning(infrastructureGraph):
             [197.34549417652961],
           [-3.61325901328181954]]
 
+    circle_shift = 0 #degree
     animate_times = 400 #ms    
 
     def __init__(self, selected_points, connectivity_edges, selected_wall, selected_area_edges, connectivity_areas, visual = False):        
@@ -375,19 +376,74 @@ class coveragePathPlanning(infrastructureGraph):
         center_p = [min_max_x[1] - (min_max_x[1]-min_max_x[0])/2, min_max_y[1] - (min_max_y[1]-min_max_y[0])/2]
         num_divide = n_robot       
         step_angle = round(360/num_divide)
-        scope_angle = [[np.deg2rad(i), np.deg2rad(i+step_angle)] for i in range(0,360,step_angle)]
+        scope_angle_temp = [[np.deg2rad(i)%(2*np.pi), np.deg2rad(i+step_angle)%(2*np.pi)] for i in range(0+self.circle_shift, 360+self.circle_shift, step_angle)]
+
+        # map scope angle to robot pose
+        scope_angle = []
+        for a in self.start_area:
+            area_p = self.area_graph._node[a]['centroid']
+            angle_a = np.arctan2(area_p[1]-center_p[1], area_p[0]-center_p[0])
             
+            if angle_a < 0:
+                angle_a += 2*np.pi
+            
+            in_scope = False
+            scope = -1
+            dist = {}
+
+            for i in range(len(scope_angle_temp)):
+                if(scope_angle_temp[i][1] > scope_angle_temp[i][0]):
+                    if scope_angle_temp[i][0] <= angle_a < scope_angle_temp[i][1]:
+                        in_scope = True
+                        scope = i
+                    else:
+                        dist_lo = abs(angle_a-scope_angle_temp[i][0])
+                        dist_up = abs(angle_a-scope_angle_temp[i][1])
+
+                        dist[i] = [dist_lo, dist_up]
+                else:
+                    if (scope_angle_temp[i][0] <= angle_a <= 2*np.pi) or (0 <= angle_a < scope_angle_temp[i][1]):
+                        in_scope = True
+                        scope = i
+                    else:
+                        dist_lo = abs(angle_a-scope_angle_temp[i][0])
+                        dist_up = abs(angle_a-scope_angle_temp[i][1])
+
+                        dist[i] = [dist_lo, dist_up]
+                    
+            if in_scope:
+                scope_angle.append(scope_angle_temp[scope])
+                scope_angle_temp.pop(scope)
+            else:
+                min_dist = min(dist[0])
+                dist_idx = 0
+                for i in range(1,len(dist)):
+                    if min(dist[i]) < min_dist:
+                        min_dist = min(dist[i])
+                        dist_idx = i
+                
+                scope_angle.append(scope_angle_temp[dist_idx])
+                scope_angle_temp.pop(dist_idx)
+
         # assign responsible area from devided area
         for a in cleaning_area:
             area_p = self.area_graph._node[a]['centroid']
             angle_a = np.arctan2(area_p[1]-center_p[1], area_p[0]-center_p[0])
+
             if angle_a < 0:
                 angle_a += 2*np.pi
             
-            index_robot = [x for x in range(len(scope_angle)) if angle_a >= scope_angle[x][0] and angle_a < scope_angle[x][1]][0]
-            self.cleanning_area[index_robot].append(a)
-            
+            index_robot = -1
+            for x in range(len(scope_angle)):
+                if scope_angle[x][1] > scope_angle[x][0]:
+                    if scope_angle[x][0] <= angle_a < scope_angle[x][1]:
+                        index_robot = x
+                else:
+                    if (scope_angle[x][0] <= angle_a <= 2*np.pi) or (0 <= angle_a < scope_angle[x][1]):
+                        index_robot = x
 
+            self.cleanning_area[index_robot].append(a)
+        
         # share load
         if n_robot > 1:
             flag_balance = False
@@ -425,9 +481,6 @@ class coveragePathPlanning(infrastructureGraph):
 
                 min_share_load_area = min_share_load_robot[robot_index]
                 area_index = list(np.transpose(share_load_list)[robot_index]).index(min_share_load_area)
-
-                # self.cleanning_area[robot_index].append(self.cleanning_area[max_unequal_index][area_index])
-                # self.cleanning_area[max_unequal_index].pop(area_index)
 
                 # find closet area to share
                 distance_weight_list = []
@@ -757,25 +810,35 @@ class coveragePathPlanning(infrastructureGraph):
             self.clean_path.append([])
             self.mid_edge_path_idx.append([])
 
+            cleaning_area = []
+            for i in range(len(self.cleanning_area[r])):
+                cleaning_area.append(self.cleanning_area[r][i])
+
             data = {}
             data['location'] = []
             locations = []
-            # if self.start_area[r] not in self.cleanning_area[r]:
-            #     data['location'] += [tuple(self.area_graph._node[self.start_area[r]]['centroid'])]
-            #     locations.append(self.start_area[r])
+            if self.start_area[r] not in cleaning_area:
+                data['location'] += [tuple(self.area_graph._node[self.start_area[r]]['centroid'])]
+                locations.append(self.start_area[r])
+            else:
+                data['location'] += [tuple(self.area_graph._node[self.start_area[r]]['centroid'])]
+                locations.append(self.start_area[r])
+                cleaning_area.pop(cleaning_area.index(self.start_area[r]))
 
-            for i in self.cleanning_area[r]:
+            for i in cleaning_area:
                 data['location'] += [tuple(self.area_graph._node[i]['centroid'])]
                 locations.append(i)
             
+            if self.goal_area[r] not in cleaning_area:
+                data['location'] += [tuple(self.area_graph._node[self.goal_area[r]]['centroid'])]
+                locations.append(self.goal_area[r])
+            else:
+                data['location'] += [tuple(self.area_graph._node[self.goal_area[r]]['centroid'])]
+                locations.append(self.goal_area[r])
+                cleaning_area.pop(cleaning_area.index(self.goal_area[r]))
 
-            # if self.goal_area[r] not in self.cleanning_area[r]:
-            #     data['location'] += [tuple(self.area_graph._node[self.goal_area[r]]['centroid'])]
-            #     locations.append(self.goal_area[r])
-
-            # if self.goal_area[r] == self.start_area[r]:
-            #     data['location'] += [tuple(self.area_graph._node[self.goal_area[r]]['centroid'])]
-            #     locations.append(self.goal_area[r])
+            data['location'] += [tuple([10000,10000])]
+            locations.append('d')
 
             data['num_vehicles'] = 1
             data['depot'] = 1
@@ -787,9 +850,23 @@ class coveragePathPlanning(infrastructureGraph):
                     if from_counter == to_counter:
                         distances[from_counter][to_counter] = 0
                     else:
-                        path,dist_ = self.find_shortest_path(from_node, to_node)
-                        distances[from_counter][to_counter] = dist_                        
-
+                        if from_counter != len(locations)-1:
+                            if to_counter != len(locations)-1:
+                                if from_node == to_node:
+                                    distances[from_counter][to_counter] = 100000000
+                                else:    
+                                    path,dist_ = self.find_shortest_path(from_node, to_node)
+                                    distances[from_counter][to_counter] = dist_ 
+                            else:
+                                if from_counter == 0 or from_counter == len(locations)-2:  ## constraint dummy point dist between start and end as zero otherwise infinity
+                                    distances[from_counter][to_counter] = 0.0000000000000000000000001
+                                else:
+                                    distances[from_counter][to_counter] = 10000000000
+                        else:
+                            if to_counter == 0 or to_counter == len(locations)-2:  ## constraint dummy point dist between start and end as zero otherwise infinity
+                                    distances[from_counter][to_counter] = 0.0000000000000000000000001
+                            else:
+                                distances[from_counter][to_counter] = 10000000000
             # ortools algorithm part
             manager = pywrapcp.RoutingIndexManager(len(data['location']), data['num_vehicles'], data['depot'])        
             rounting = pywrapcp.RoutingModel(manager)
@@ -842,13 +919,45 @@ class coveragePathPlanning(infrastructureGraph):
                     ind_via_points = best_state[0:n_state-1]
 
             # map index to via-points
-            for j in ind_via_points:
-                if j != 0 and j != len(ind_via_points)-1:
-                    self.area_path[r] += locations[j]
-                    
+            area_step = [locations[j] for j in ind_via_points]
+            
+            for i in range(len(area_step)-1):
+                from_area = area_step[i]
+                to_area = area_step[i+1]
+                path_,dist = self.find_shortest_path(from_area,to_area)
+                
+                if i != len(area_step)-2:
+                    path = path_[:-1]
+                else:
+                    path = path_
 
+                for j in path:
+                    self.area_path[r] += [j]
+                    if j in self.cleanning_area[r]:
+                        self.clean_path[r] += [1]
+                        self.cleanning_area[r].pop(self.cleanning_area[r].index(j))
+                    else:
+                        self.clean_path[r] += [0]
+            
+            mid_edge_path = [list(set([e for e in self.area_graph._node[self.area_path[r][x]]['area_edges']]).intersection(set([e for e in self.area_graph._node[self.area_path[r][x+1]]['area_edges']]))) for x in range(len(self.area_path[r])-1)]
+            
+            filter_mid_edge_path = []
+            for i in mid_edge_path:
+                if len(i) > 1:
+                    for j in i:
+                        if not self.wall_graph[self.wall_edges_dict[j][0]][self.wall_edges_dict[j][1]]['isWall'] :
+                            filter_mid_edge_path.append(j)
+                else:
+                    filter_mid_edge_path.append(i[0])
 
-        
+            self.mid_edge_path_idx[r] = [[self.mid_edges_graph._node[y]['edge_Number'] for y in self.mid_edges_graph._node].index(x)+1 for x in filter_mid_edge_path]
+
+            print('finish generated area paths for robot : ' + str(r))
+            print(self.area_path[r])
+            print(self.clean_path[r])
+            print('\n')
+
+        return None
     
     def find_shortest_path(self, from_area, to_area):
         k = 1
@@ -1278,6 +1387,27 @@ class coveragePathPlanning(infrastructureGraph):
             self.line1, = self.ax.plot([],[], '--b', lw = 2)
             self.line2, = self.ax.plot([],[], 'r', lw = 2)
 
+            all_centroid_x = [self.area_graph._node[a]['centroid'][0] for a in self.area_graph._node]
+            all_centroid_y = [self.area_graph._node[a]['centroid'][1] for a in self.area_graph._node]
+            
+            min_max_x = [sorted(all_centroid_x)[0], sorted(all_centroid_x)[-1]]
+            min_max_y = [sorted(all_centroid_y)[0], sorted(all_centroid_y)[-1]]
+
+            max_x = max([abs(sorted(all_centroid_x)[0]), abs(sorted(all_centroid_x)[-1])])
+            max_y = max([abs(sorted(all_centroid_y)[0]), abs(sorted(all_centroid_y)[-1])])
+
+            L = np.sqrt(max_x**2 + max_y**2)/2
+            
+            center_p = [min_max_x[1] - (min_max_x[1]-min_max_x[0])/2, min_max_y[1] - (min_max_y[1]-min_max_y[0])/2]
+
+            num_divide = len(self.start_area)       
+            step_angle = round(360/num_divide)
+            scope_angle = [[np.deg2rad(i), np.deg2rad(i+step_angle)] for i in range(0, 360, step_angle)]
+
+            for i in scope_angle:
+                for j in i:
+                    plt.plot([center_p[0], center_p[0]+L*np.cos(j+np.deg2rad(self.circle_shift))],[center_p[1], center_p[1]+L*np.sin(j+np.deg2rad(self.circle_shift))], '--g')
+
             for i in self.wall_edges_dict:
                 wall_i = self.wall_edges_dict[i]
                 points = [self.wall_graph._node[wall_i[0]]['Coordinates'], self.wall_graph._node[wall_i[1]]['Coordinates']]
@@ -1288,16 +1418,11 @@ class coveragePathPlanning(infrastructureGraph):
                 
                 plt.plot([points[0][0], points[1][0]], [points[0][1], points[1][1]], c)
 
-                # point_mid = self.wall_graph[wall_i[0]][wall_i[1]]['midEdge']
-                # plt.plot(point_mid[0], point_mid[1], 'k.')
-                # plt.text(point_mid[0], point_mid[1], str(i))
-                
             for i in self.area_graph._node:
                 plt.text(self.area_graph._node[i]['centroid'][0], self.area_graph._node[i]['centroid'][1], str(i))
                 for j in self.area_graph._node[i]['actual_vertices']:
                     x = self.wall_graph._node[j]['Coordinates'][0]
                     y = self.wall_graph._node[j]['Coordinates'][1]
-                    # plt.plot(x, y, 'b*')
 
             anim = animation.FuncAnimation(self.fig, self.animate, init_func = self.init_animate, frames = max([len(i) for i in self.robot_path]), interval = self.animate_times, blit = False)
             plt.axis('equal')
@@ -1588,6 +1713,6 @@ if __name__ == "__main__":
     CPP.initialize_graphs()
     # CPP.visual_area()
 
-    CPP.generate_robotWorkFlowPath([[0,0]], [[12,20]], [1,6,21,25,30,37])
+    CPP.generate_robotWorkFlowPath([[0,0]], [[0,0]], [37,38,19,20,15,28,29,32,6])
     
     print("")
