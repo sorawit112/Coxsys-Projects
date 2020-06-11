@@ -5,6 +5,7 @@ from matplotlib import animation
 from matplotlib import path
 from numpy import matlib
 
+from scipy.cluster.vq import kmeans,vq
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
@@ -204,7 +205,7 @@ class coveragePathPlanning(infrastructureGraph):
             [197.34549417652961],
           [-3.61325901328181954]]
 
-    circle_shift = 0 #degree
+    circle_shift = 30 #degree
     animate_times = 400 #ms    
 
     def __init__(self, selected_points, connectivity_edges, selected_wall, selected_area_edges, connectivity_areas, visual = False):        
@@ -234,7 +235,8 @@ class coveragePathPlanning(infrastructureGraph):
     ##############################################################################################################################
 
     def generate_robotWorkFlowPath(self, start_pose, goal_pose, cleaning_area):        
-        self.fleet_management( start_pose, goal_pose, cleaning_area)
+
+        self.fleet_management_V2( start_pose, goal_pose, cleaning_area)
 
         ## generate via-points
         n_robot = len(start_pose)
@@ -339,33 +341,6 @@ class coveragePathPlanning(infrastructureGraph):
     def fleet_management(self, start_pose, goal_pose, cleaning_area):
         n_robot = len(start_pose)
         
-        for r in range(n_robot):
-            start_point = start_pose[r]
-            goal_point = goal_pose[r]
-
-            # detect area for start pose and goal pose
-            i = 1
-            flag_start = False
-            flag_goal = False
-
-            while i <= len(self.area_graph._node):
-                ver_list = self.area_graph._node[i]['actual_vertices']
-                coor = np.transpose([self.wall_graph._node[x]['Coordinates'] for x in ver_list])
-                if inpolygon(np.array([start_point[0]]), np.array([start_point[1]]), coor[0], coor[1])[0] and not flag_start:
-                    self.start_area.append(i)
-                    flag_start = True
-                
-                if inpolygon(np.array([goal_point[0]]), np.array([goal_point[1]]), coor[0], coor[1])[0] and not flag_goal:
-                    self.goal_area.append(i)
-                    flag_goal = True
-
-                if flag_start and flag_goal:
-                    break
-
-                i = i + 1
-            
-            self.cleanning_area.append([])
-
         # !-------- sprit zone as a circle -----------!  * case start area and goal as a same area in all robot
         all_centroid_x = [self.area_graph._node[a]['centroid'][0] for a in self.area_graph._node]
         all_centroid_y = [self.area_graph._node[a]['centroid'][1] for a in self.area_graph._node]
@@ -425,6 +400,33 @@ class coveragePathPlanning(infrastructureGraph):
                 scope_angle.append(scope_angle_temp[dist_idx])
                 scope_angle_temp.pop(dist_idx)
 
+        for r in range(n_robot):
+            start_point = start_pose[r]
+            goal_point = goal_pose[r]
+
+            # detect area for start pose and goal pose
+            i = 1
+            flag_start = False
+            flag_goal = False
+
+            while i <= len(self.area_graph._node):
+                ver_list = self.area_graph._node[i]['actual_vertices']
+                coor = np.transpose([self.wall_graph._node[x]['Coordinates'] for x in ver_list])
+                if inpolygon(np.array([start_point[0]]), np.array([start_point[1]]), coor[0], coor[1])[0] and not flag_start:
+                    self.start_area.append(i)
+                    flag_start = True
+                
+                if inpolygon(np.array([goal_point[0]]), np.array([goal_point[1]]), coor[0], coor[1])[0] and not flag_goal:
+                    self.goal_area.append(i)
+                    flag_goal = True
+
+                if flag_start and flag_goal:
+                    break
+
+                i = i + 1
+            
+            self.cleanning_area.append([])
+
         # assign responsible area from devided area
         for a in cleaning_area:
             area_p = self.area_graph._node[a]['centroid']
@@ -459,7 +461,6 @@ class coveragePathPlanning(infrastructureGraph):
                         unequal_load_list.append(0)
                 max_unequal_index = unequal_load_list.index(max(unequal_load_list)) 
                 
-                # find best robot to share load if robot > 2
                 share_load_list = []
                 current_unequal_load = self.sum_unequal_load(cleaning_area)
                 
@@ -508,6 +509,131 @@ class coveragePathPlanning(infrastructureGraph):
 
         self.generate_areaPath_v3()
 
+    def fleet_management_V2(self, start_pose, goal_pose, cleaning_area):
+        n_robot = len(start_pose)
+        
+        ## clustering group of zone with num of robots
+        # generate data
+        self.K_data = np.vstack([self.area_graph._node[a]['centroid'] for a in self.area_graph._node])
+        
+        # compute K-Means with K = n_robot
+        self.K_centroids,_ = kmeans(self.K_data, n_robot)
+        self.K_idx,_ = vq(self.K_data, self.K_centroids) 
+
+        # assight K-Means to each robot
+        self.K_robot = []
+        selected_centroid = []
+        for r in range(n_robot):
+            dist = []
+            for c in self.K_centroids:
+                dist.append(int(math.hypot((start_pose[r][0] - c[0]),(start_pose[r][1] - c[1]))))
+            
+            sorted_dist = sorted(dist)
+            for i in sorted_dist:
+                if dist.index(i) not in selected_centroid:
+                    self.K_robot.append(dist.index(i))
+                    selected_centroid.append(dist.index(i))
+                    break
+
+        # manage cleaning area
+        for r in range(n_robot):
+            start_point = start_pose[r]
+            goal_point = goal_pose[r]
+
+            # detect area for start pose and goal pose
+            i = 1
+            flag_start = False
+            flag_goal = False
+
+            while i <= len(self.area_graph._node):
+                ver_list = self.area_graph._node[i]['actual_vertices']
+                coor = np.transpose([self.wall_graph._node[x]['Coordinates'] for x in ver_list])
+                if inpolygon(np.array([start_point[0]]), np.array([start_point[1]]), coor[0], coor[1])[0] and not flag_start:
+                    self.start_area.append(i)
+                    flag_start = True
+                
+                if inpolygon(np.array([goal_point[0]]), np.array([goal_point[1]]), coor[0], coor[1])[0] and not flag_goal:
+                    self.goal_area.append(i)
+                    flag_goal = True
+
+                if flag_start and flag_goal:
+                    break
+
+                i = i + 1
+            
+            self.cleanning_area.append([])
+
+        # assign responsible area from devided area
+        for a in cleaning_area:
+            cluster = self.K_idx[a-1]
+
+            index_robot = self.K_robot.index(cluster)
+            
+            self.cleanning_area[index_robot].append(a)
+        
+        # share load
+        if n_robot > 1:
+            flag_balance = False
+
+            average_load = sum([self.area_graph._node[a]['area'] for a in cleaning_area])/len(cleaning_area)
+
+            while not flag_balance:
+                unequal_load_list = []
+                for r in range(n_robot):   # calculate unequal load of every robots
+                    if len(self.cleanning_area[r]) != 0:
+                        unequal_load_list.append(sum([self.area_graph._node[a]['area'] for a in self.cleanning_area[r]]))
+                    else:
+                        unequal_load_list.append(0)
+                max_unequal_index = unequal_load_list.index(max(unequal_load_list)) 
+
+                share_load_list = []
+                current_unequal_load = self.sum_unequal_load(cleaning_area)
+                
+                for i in range(len(self.cleanning_area[max_unequal_index])):
+                    area = self.cleanning_area[max_unequal_index][i]
+                    self.cleanning_area[max_unequal_index].pop(i)     
+                    share_load_list.append([])    
+                    for r in range(n_robot):
+                        if r != max_unequal_index:
+                            self.cleanning_area[r].append(area)
+                            share_load_list[len(share_load_list)-1].append(self.sum_unequal_load(cleaning_area))
+                            self.cleanning_area[r].pop(len(self.cleanning_area[r])-1)
+                        else:
+                            share_load_list[len(share_load_list)-1].append(10000000)
+                    self.cleanning_area[max_unequal_index].insert(i,area)
+
+                min_share_load_robot = min(share_load_list)
+                robot_index = min(share_load_list).index(min(min_share_load_robot))
+
+                min_share_load_area = min_share_load_robot[robot_index]
+                area_index = list(np.transpose(share_load_list)[robot_index]).index(min_share_load_area)
+
+                # find closet area to share
+                distance_weight_list = []
+                for i in self.cleanning_area[max_unequal_index]:
+                    from_node = self.area_graph._node[i]['centroid']
+                    dist = 0
+                    if len(self.cleanning_area[robot_index]) != 0:
+                        for j in self.cleanning_area[robot_index]:
+                            path, dist_ = self.find_shortest_path(i, j)
+                            dist += dist_
+                    else:
+                        path, dist_ = self.find_shortest_path(i, self.start_area[robot_index])
+                        dist += dist_
+                    distance_weight_list.append(dist)
+                
+                closet_index = distance_weight_list.index(min(distance_weight_list))
+                self.cleanning_area[robot_index].append(self.cleanning_area[max_unequal_index][closet_index])
+                self.cleanning_area[max_unequal_index].pop(closet_index)
+                
+                next_unequal_load = self.sum_unequal_load(cleaning_area)
+                if next_unequal_load - current_unequal_load >= 0:   #if share sum_load is increse then break
+                    self.cleanning_area[max_unequal_index].append(self.cleanning_area[robot_index][-1])
+                    self.cleanning_area[robot_index].pop(len(self.cleanning_area[robot_index])-1)
+                    break
+
+        self.generate_areaPath_v3()
+    
     def sum_unequal_load(self, cleaning_area):
         n_robot = len(self.start_area)
 
@@ -1387,26 +1513,39 @@ class coveragePathPlanning(infrastructureGraph):
             self.line1, = self.ax.plot([],[], '--b', lw = 2)
             self.line2, = self.ax.plot([],[], 'r', lw = 2)
 
-            all_centroid_x = [self.area_graph._node[a]['centroid'][0] for a in self.area_graph._node]
-            all_centroid_y = [self.area_graph._node[a]['centroid'][1] for a in self.area_graph._node]
+            # all_centroid_x = [self.area_graph._node[a]['centroid'][0] for a in self.area_graph._node]
+            # all_centroid_y = [self.area_graph._node[a]['centroid'][1] for a in self.area_graph._node]
             
-            min_max_x = [sorted(all_centroid_x)[0], sorted(all_centroid_x)[-1]]
-            min_max_y = [sorted(all_centroid_y)[0], sorted(all_centroid_y)[-1]]
+            # min_max_x = [sorted(all_centroid_x)[0], sorted(all_centroid_x)[-1]]
+            # min_max_y = [sorted(all_centroid_y)[0], sorted(all_centroid_y)[-1]]
 
-            max_x = max([abs(sorted(all_centroid_x)[0]), abs(sorted(all_centroid_x)[-1])])
-            max_y = max([abs(sorted(all_centroid_y)[0]), abs(sorted(all_centroid_y)[-1])])
+            # max_x = max([abs(sorted(all_centroid_x)[0]), abs(sorted(all_centroid_x)[-1])])
+            # max_y = max([abs(sorted(all_centroid_y)[0]), abs(sorted(all_centroid_y)[-1])])
 
-            L = np.sqrt(max_x**2 + max_y**2)/2
+            # L = np.sqrt(max_x**2 + max_y**2)/2
             
-            center_p = [min_max_x[1] - (min_max_x[1]-min_max_x[0])/2, min_max_y[1] - (min_max_y[1]-min_max_y[0])/2]
+            # center_p = [min_max_x[1] - (min_max_x[1]-min_max_x[0])/2, min_max_y[1] - (min_max_y[1]-min_max_y[0])/2]
 
-            num_divide = len(self.start_area)       
-            step_angle = round(360/num_divide)
-            scope_angle = [[np.deg2rad(i), np.deg2rad(i+step_angle)] for i in range(0, 360, step_angle)]
+            # num_divide = len(self.start_area)       
+            # step_angle = round(360/num_divide)
+            # scope_angle = [[np.deg2rad(i), np.deg2rad(i+step_angle)] for i in range(0, 360, step_angle)]
 
-            for i in scope_angle:
-                for j in i:
-                    plt.plot([center_p[0], center_p[0]+L*np.cos(j+np.deg2rad(self.circle_shift))],[center_p[1], center_p[1]+L*np.sin(j+np.deg2rad(self.circle_shift))], '--g')
+            # for i in scope_angle:
+            #     for j in i:
+            #         plt.plot([center_p[0], center_p[0]+L*np.cos(j+np.deg2rad(self.circle_shift))],[center_p[1], center_p[1]+L*np.sin(j+np.deg2rad(self.circle_shift))], '--g')
+
+            
+
+            for r in range(len(self.start_area)):
+                if r == 0:
+                    cl = 'k'
+                elif r == 1:
+                    cl = 'b'
+                elif r == 2:
+                    cl = 'r'
+
+                plt.plot(self.K_data[self.K_idx==self.K_robot[r],0],self.K_data[self.K_idx==self.K_robot[r],1], 'o' + cl)
+                plt.plot(self.K_centroids[self.K_robot[r],0],self.K_centroids[self.K_robot[r],1], 's' + cl, markersize=8)
 
             for i in self.wall_edges_dict:
                 wall_i = self.wall_edges_dict[i]
@@ -1713,6 +1852,6 @@ if __name__ == "__main__":
     CPP.initialize_graphs()
     # CPP.visual_area()
 
-    CPP.generate_robotWorkFlowPath([[0,0]], [[0,0]], [37,38,19,20,15,28,29,32,6])
+    CPP.generate_robotWorkFlowPath([[24,-4],[0,0],[14,18]], [[0,0],[0,0],[0,0]], [37,38,19,20,15,28,29,32,6])
     
     print("")
