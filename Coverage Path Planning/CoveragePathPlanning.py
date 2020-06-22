@@ -64,8 +64,9 @@ class infrastructureGraph:
 
         # create edges
         for edge in name_Edges:
+            w = math.hypot((self.wall_graph._node[self.con_e[0][edge-1]]['Coordinates'][0] - self.wall_graph._node[self.con_e[1][edge-1]]['Coordinates'][0]),(self.wall_graph._node[self.con_e[0][edge-1]]['Coordinates'][1] - self.wall_graph._node[self.con_e[1][edge-1]]['Coordinates'][1]))
             self.wall_edges_dict[edge] = [self.con_e[0][edge-1], self.con_e[1][edge-1]]
-            self.wall_graph.add_edge(self.con_e[0][edge-1], self.con_e[1][edge-1], Number = edge, isWall = self.isWall[edge-1], midEdge = np.add([self.wall_graph._node[self.con_e[0][edge-1]]['Coordinates'][0], self.wall_graph._node[self.con_e[0][edge-1]]['Coordinates'][1]],[self.wall_graph._node[self.con_e[1][edge-1]]['Coordinates'][0], self.wall_graph._node[self.con_e[1][edge-1]]['Coordinates'][1]])/2)
+            self.wall_graph.add_edge(self.con_e[0][edge-1], self.con_e[1][edge-1], Number = edge, isWall = self.isWall[edge-1], midEdge = np.add([self.wall_graph._node[self.con_e[0][edge-1]]['Coordinates'][0], self.wall_graph._node[self.con_e[0][edge-1]]['Coordinates'][1]],[self.wall_graph._node[self.con_e[1][edge-1]]['Coordinates'][0], self.wall_graph._node[self.con_e[1][edge-1]]['Coordinates'][1]])/2, weight = w)
 
         return None
     
@@ -75,7 +76,6 @@ class infrastructureGraph:
 
         # automatically detect vertices of an area based on edge
         for i in range(num_area):
-            
             area_edges_i = self.area_edges[i]
             wall_i = [self.wall_edges_dict[edge] for edge in area_edges_i]
             vertices_i = []
@@ -169,7 +169,7 @@ class infrastructureGraph:
 
             mid_edge_idx = [node_mid_edge.index(x[0])+1, node_mid_edge.index(x[1])+1]
             # weight = sum((point_a-point_b)**2)
-            weight = int(math.hypot((point_a[0] - point_b[0]),(point_a[1] - point_b[1])))
+            weight = math.hypot((point_a[0] - point_b[0]),(point_a[1] - point_b[1]))
 
             self.mid_edges_graph.add_edge(mid_edge_idx[0], mid_edge_idx[1], weight = weight)
 
