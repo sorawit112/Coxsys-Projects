@@ -67,44 +67,138 @@ class infrastructureGraph:
         self.area_edges = []
         self.con_a = []
 
-        explored = []
-        all_area_edges = []
+        N = 0
+        explored_list = []
+        all_vertices_list = []
         # automatically detect area_edges
         for node in name_Nodes:
             neighbors = [i for i in self.wall_graph.edges._adjdict[node]]
-            all_area_edges = np.concatenate(([[1 for i in range(len(neighbors))]], [neighbors]),axis = 0).T
-            while True:
-                temp_path = []
-                for path in all_area_edges:
-                    before = path[len(path)-2]
-                    neighbors = [i for i in self.wall_graph.edges._adjdict[path[-1]] if i != before]
+            all_vertices_list = (np.concatenate(([[1 for i in range(len(neighbors))]], [neighbors]),axis = 0).T).tolist()
+            while len(all_vertices_list) != 0:
+                temp_vert_list = []
+                for vert in all_vertices_list:
+                    before = vert[len(vert)-2]
+                    neighbors = [i for i in self.wall_graph.edges._adjdict[vert[-1]] if i != before]
                 
-                    if len(temp_path) == 0:
-                        temp_path = np.concatenate((np.array([list(path) for j in range(len(neighbors))]).T, [neighbors]), axis = 0).T
+                    if len(temp_vert_list) == 0:
+                        temp_vert_list = (np.concatenate((np.array([list(vert) for j in range(len(neighbors))]).T, [neighbors]), axis = 0).T).tolist()
                     else:
-                        temp_path = np.concatenate((temp_path, np.concatenate((np.array([list(path) for j in range(len(neighbors))]).T, [neighbors]), axis = 0).T), axis = 0)
+                        temp_vert_list = (np.concatenate((temp_vert_list, (np.concatenate((np.array([list(vert) for j in range(len(neighbors))]).T, [neighbors]), axis = 0).T).tolist()), axis = 0)).tolist()
 
-                all_area_edges = temp_path
+                all_vertices_list = temp_vert_list
 
-                for edges in all_area_edges:
-                    if edges[0] == edges[-1]:
-                        self.area_edges.append(list(edges))
-                        break
+                for vert_list in  all_vertices_list:
+                    if vert_list[0] == vert_list[-1]:
+                        if len(explored_list) > 0:
+                            if any([set(vert_list).issubset(set(k)) for k in explored_list]):
+                                continue
+                        vertices = vert_list        
+                        num_ver = len(vertices)
+                        self.area_edges.append([])
 
-                for edges in range(len(all_area_edges)):
-                    for i in self.area_edges:
-                        if set(i).issubset(set(list(edges))):
-                            
+                        for i in range(num_ver-1):
+                            self.area_edges[N].append(self.wall_graph[vertices[i]][vertices[i+1]]['Number'])
                         
+                        vertices = vert_list[:-1]
+                        explored_list.append(vertices) 
+                        num_ver = len(vertices)
+                        coordinates = [self.wall_graph._node[ver]['Coordinates'] for ver in vertices]
+                        
+                        centroid_i = self.centroid(coordinates)
 
-                
+                        ver_shift = np.subtract(coordinates, centroid_i)
+                        theta_i = np.zeros((num_ver))
 
+                        for j in range(num_ver):
+                            point_a = ver_shift[j]
+                            if j+1 != num_ver:
+                                point_b = ver_shift[j+1]
+                            else:
+                                point_b = ver_shift[0]
 
-                
+                            theta_i[j] = np.mod(np.arctan2(point_b[1] - point_a[1], point_b[0] - point_a[0]), 2*np.pi)
+                        
+                        actual_theta = []
+                        actual_vertices = []
+                        ver_list = vertices
 
+                        for j in range(num_ver):
+                            if len(actual_theta) == 0:
+                                actual_theta.append(theta_i[j])
+                                actual_vertices.append(ver_list[j])
+                            else:
+                                if abs(theta_i[j-1] - theta_i[j]) > 0.000001:
+                                    actual_theta.append(theta_i[j])
+                                    actual_vertices.append(ver_list[j])
 
+                        actual_coordinates = [self.wall_graph._node[x]['Coordinates'] for x in actual_vertices]
+                        count_angle = 1
+                        angle = [actual_vertices[0]]
 
+                        for j in range(len(actual_theta)-1):
+                            if abs(actual_theta[j+1] - actual_theta[j]) > 0.1:
+                                count_angle += 1
+                                angle.append(actual_vertices[j+1])
 
+                        self.area_graph.add_node(N+1, centroid = self.centroid(actual_coordinates), area = PolyArea([cor[0] for cor in coordinates], [cor[1] for cor in coordinates]), vertices = vertices, actual_vertices = actual_vertices, area_edges = self.area_edges[N], angle = angle)
+                    
+                        N += 1                        
+
+                deleted = []
+                for i in range(len(all_vertices_list)):
+                    vertices = all_vertices_list[i]
+                    num_ver = len(vertices)
+                    coordinates = [self.wall_graph._node[ver]['Coordinates'] for ver in vertices]
+                    
+                    centroid_i = self.centroid(coordinates)
+
+                    ver_shift = np.subtract(coordinates, centroid_i)
+                    theta_i = np.zeros((num_ver))
+
+                    for j in range(num_ver):
+                        point_a = ver_shift[j]
+                        if j+1 != num_ver:
+                            point_b = ver_shift[j+1]
+                        else:
+                            point_b = ver_shift[0]
+
+                        theta_i[j] = np.mod(np.arctan2(point_b[1] - point_a[1], point_b[0] - point_a[0]), 2*np.pi)
+                    
+                    actual_theta = []
+                    actual_vertices = []
+                    ver_list = vertices
+
+                    for j in range(num_ver):
+                        if len(actual_theta) == 0:
+                            actual_theta.append(theta_i[j])
+                            actual_vertices.append(ver_list[j])
+                        else:
+                            if abs(theta_i[j-1] - theta_i[j]) > 0.000001:
+                                actual_theta.append(theta_i[j])
+                                actual_vertices.append(ver_list[j])
+
+                    actual_coordinates = [self.wall_graph._node[x]['Coordinates'] for x in actual_vertices]
+                    count_angle = 1
+
+                    for j in range(len(actual_theta)-1):
+                        if abs(actual_theta[j+1] - actual_theta[j]) > 0.1:
+                            count_angle += 1
+                            
+                    if count_angle > 5:
+                        deleted.append(i)
+                        continue
+
+                    for j in range(len(explored_list)):
+                        angle_j = self.area_graph._node[j+1]['angle']
+                        sub_list = angle_j[2] 
+
+                        if set(explored_list[j]).issubset(set(all_vertices_list[i])):
+                            deleted.append(i)
+                            
+                count = 0
+                for i in deleted:
+                    all_vertices_list.pop(i - count)
+                    count += 1
 
         # automatically detect vertices of an area based on edge
         for i in range(num_area):

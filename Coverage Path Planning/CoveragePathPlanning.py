@@ -1048,6 +1048,7 @@ class coveragePathPlanning(infrastructureGraph):
             else:
                 c = '--r'
             
+            plt.text(points[0][0],points[0][1], str(wall_i[0]))
             plt.plot([points[0][0], points[1][0]], [points[0][1], points[1][1]], c)
                 
         for i in self.area_graph._node:
@@ -1381,8 +1382,8 @@ if __name__ == "__main__":
     #----------------------------------Construction Graph---------------------------------------------------------------#
     CPP = coveragePathPlanning(p, con_e, isWall, area_edges, con_a, True)
     CPP.initialize_graphs()
-    # CPP.visual_area()
+    CPP.visual_area()
 
-    CPP.generate_robotWorkFlowPath([[24,-4],[0,0]], [[0,0],[24,-4]], [37,38,19,20,15,28,29,32,6])
+    # CPP.generate_robotWorkFlowPath([[24,-4],[0,0]], [[0,0],[24,-4]], [37,38,19,20,15,28,29,32,6])
     
     print("")
